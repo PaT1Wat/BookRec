@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { BookOpen, Search, Heart, Home, MessageCircle } from "lucide-react";
+import { BookOpen, Search, Heart, Home, Settings } from "lucide-react";
 
 const Navbar = () => {
   const location = useLocation();
@@ -8,6 +8,7 @@ const Navbar = () => {
     { to: "/", label: "หน้าแรก", icon: Home },
     { to: "/search", label: "ค้นหา", icon: Search },
     { to: "/favorites", label: "ชั้นหนังสือ", icon: Heart },
+    { to: "/admin", label: "จัดการ", icon: Settings },
   ];
 
   return (
