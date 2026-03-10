@@ -1,11 +1,13 @@
 import { useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search, Filter, X } from "lucide-react";
-import { books, genres, searchBooks, BookType, Genre } from "@/data/books";
+import { genres, type BookType, type Genre } from "@/data/books";
+import { useBooks } from "@/context/BooksContext";
 import BookCard from "@/components/BookCard";
 
 const SearchPage = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { searchBooks } = useBooks();
+  const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") || "";
   const initialGenre = searchParams.get("genre") || "";
 
@@ -21,7 +23,7 @@ const SearchPage = () => {
       type: selectedType || undefined,
       genres: selectedGenres.length > 0 ? selectedGenres : undefined,
     });
-  }, [query, selectedType, selectedGenres]);
+  }, [query, selectedType, selectedGenres, searchBooks]);
 
   const toggleGenre = (g: Genre) => {
     setSelectedGenres(prev =>

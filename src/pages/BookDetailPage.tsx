@@ -1,11 +1,12 @@
 import { useParams, Link } from "react-router-dom";
-import { Star, Heart, ArrowLeft, BookOpen, User, Building2, Tag } from "lucide-react";
-import { books } from "@/data/books";
+import { Star, Heart, ArrowLeft, User, Building2 } from "lucide-react";
+import { useBooks } from "@/context/BooksContext";
 import { useFavorites } from "@/lib/favorites";
 import BookCard from "@/components/BookCard";
 
 const BookDetailPage = () => {
   const { id } = useParams();
+  const { books } = useBooks();
   const book = books.find(b => b.id === id);
   const { toggle, check } = useFavorites();
 
@@ -28,7 +29,6 @@ const BookDetailPage = () => {
       </Link>
 
       <div className="grid gap-8 md:grid-cols-[280px_1fr]">
-        {/* Cover */}
         <div className="space-y-4">
           <div className="overflow-hidden rounded-xl shadow-card">
             <img src={book.coverUrl} alt={book.title} className="w-full object-cover aspect-[2/3]" />
@@ -46,7 +46,6 @@ const BookDetailPage = () => {
           </button>
         </div>
 
-        {/* Details */}
         <div className="space-y-6">
           <div>
             <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
@@ -59,10 +58,7 @@ const BookDetailPage = () => {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Star
-                  key={i}
-                  className={`h-5 w-5 ${i < Math.round(book.rating) ? "fill-star text-star" : "text-muted-foreground/30"}`}
-                />
+                <Star key={i} className={`h-5 w-5 ${i < Math.round(book.rating) ? "fill-star text-star" : "text-muted-foreground/30"}`} />
               ))}
             </div>
             <span className="text-lg font-bold text-foreground">{book.rating}</span>
@@ -97,25 +93,18 @@ const BookDetailPage = () => {
             <h3 className="mb-2 text-sm font-semibold text-foreground">แนว & แท็ก</h3>
             <div className="flex flex-wrap gap-2">
               {book.genres.map(g => (
-                <Link
-                  key={g}
-                  to={`/search?genre=${g}`}
-                  className="rounded-full bg-tag-bg px-3 py-1 text-xs font-medium text-tag-fg hover:bg-primary/10 transition-colors"
-                >
+                <Link key={g} to={`/search?genre=${g}`} className="rounded-full bg-tag-bg px-3 py-1 text-xs font-medium text-tag-fg hover:bg-primary/10 transition-colors">
                   {g}
                 </Link>
               ))}
               {book.tags.map(t => (
-                <span key={t} className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
-                  #{t}
-                </span>
+                <span key={t} className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">#{t}</span>
               ))}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Related books */}
       {relatedBooks.length > 0 && (
         <section className="mt-12">
           <h2 className="mb-6 text-xl font-bold text-foreground font-display">📚 หนังสือที่คล้ายกัน</h2>
