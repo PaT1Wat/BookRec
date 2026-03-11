@@ -1,14 +1,17 @@
 import { Link, useLocation } from "react-router-dom";
-import { BookOpen, Search, Heart, Home, Settings } from "lucide-react";
+import { BookOpen, Search, Heart, Home, Settings, LogIn, LogOut, User } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { Button } from "@/components/ui/button";
 
 const Navbar = () => {
   const location = useLocation();
+  const { user, profile, isAdmin, signOut } = useAuth();
 
   const links = [
     { to: "/", label: "หน้าแรก", icon: Home },
     { to: "/search", label: "ค้นหา", icon: Search },
     { to: "/favorites", label: "ชั้นหนังสือ", icon: Heart },
-    { to: "/admin", label: "จัดการ", icon: Settings },
+    ...(isAdmin ? [{ to: "/admin", label: "จัดการ", icon: Settings }] : []),
   ];
 
   return (
@@ -38,6 +41,31 @@ const Navbar = () => {
               <span className="hidden sm:inline">{label}</span>
             </Link>
           ))}
+
+          {user ? (
+            <div className="flex items-center gap-2 ml-2">
+              <div className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-1.5">
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                ) : (
+                  <User className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="hidden sm:inline text-xs font-medium text-foreground">
+                  {profile?.display_name || user.email?.split("@")[0]}
+                </span>
+              </div>
+              <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <Link to="/auth">
+              <Button variant="default" size="sm" className="ml-2 gap-1">
+                <LogIn className="h-4 w-4" />
+                <span className="hidden sm:inline">เข้าสู่ระบบ</span>
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
     </nav>
