@@ -1,10 +1,11 @@
-import { books } from "@/data/books";
+import { useBooks } from "@/context/BooksContext";
 import { useFavorites } from "@/lib/favorites";
 import BookCard from "@/components/BookCard";
 import { BookOpen, Heart } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const FavoritesPage = () => {
+  const { books } = useBooks();
   const { favorites } = useFavorites();
   const favoriteBooks = books.filter(b => favorites.includes(b.id));
 

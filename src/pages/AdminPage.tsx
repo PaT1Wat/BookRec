@@ -34,6 +34,7 @@ const AdminPage = () => {
   const [form, setForm] = useState<FormData>(emptyForm);
   const [tagsInput, setTagsInput] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const filtered = books.filter(
     b =>
@@ -56,26 +57,37 @@ const AdminPage = () => {
     setShowForm(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.title || !form.author) {
       toast({ title: "กรุณากรอกชื่อเรื่องและผู้แต่ง", variant: "destructive" });
       return;
     }
-    const data = { ...form, tags: tagsInput.split(",").map(t => t.trim()).filter(Boolean) };
-    if (editingId) {
-      updateBook(editingId, data);
-      toast({ title: "แก้ไขหนังสือสำเร็จ ✅" });
-    } else {
-      addBook(data);
-      toast({ title: "เพิ่มหนังสือสำเร็จ ✅" });
+    setSaving(true);
+    try {
+      const data = { ...form, tags: tagsInput.split(",").map(t => t.trim()).filter(Boolean) };
+      if (editingId) {
+        await updateBook(editingId, data);
+        toast({ title: "แก้ไขหนังสือสำเร็จ ✅" });
+      } else {
+        await addBook(data);
+        toast({ title: "เพิ่มหนังสือสำเร็จ ✅" });
+      }
+      setShowForm(false);
+    } catch (err: any) {
+      toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
-    setShowForm(false);
   };
 
-  const handleDelete = (id: string) => {
-    deleteBook(id);
-    setDeleteConfirm(null);
-    toast({ title: "ลบหนังสือสำเร็จ 🗑️" });
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteBook(id);
+      setDeleteConfirm(null);
+      toast({ title: "ลบหนังสือสำเร็จ 🗑️" });
+    } catch (err: any) {
+      toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
+    }
   };
 
   const toggleGenre = (g: Genre) => {
@@ -97,18 +109,11 @@ const AdminPage = () => {
         </Button>
       </div>
 
-      {/* Search */}
       <div className="relative mb-6">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="ค้นหาชื่อเรื่องหรือผู้แต่ง..."
-          className="pl-9"
-        />
+        <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาชื่อเรื่องหรือผู้แต่ง..." className="pl-9" />
       </div>
 
-      {/* Book list */}
       <div className="rounded-xl border border-border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-secondary">
@@ -164,7 +169,6 @@ const AdminPage = () => {
         )}
       </div>
 
-      {/* Form modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 backdrop-blur-sm p-4">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-4 scrollbar-thin">
@@ -285,8 +289,8 @@ const AdminPage = () => {
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowForm(false)}>ยกเลิก</Button>
-              <Button onClick={handleSave} className="gap-2">
-                <Save className="h-4 w-4" /> {editingId ? "บันทึกการแก้ไข" : "เพิ่มหนังสือ"}
+              <Button onClick={handleSave} disabled={saving} className="gap-2">
+                <Save className="h-4 w-4" /> {saving ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "เพิ่มหนังสือ"}
               </Button>
             </div>
           </div>
