@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { BookOpen, Search, Heart, Home, Settings, LogIn, LogOut, User } from "lucide-react";
+import { BookOpen, Search, Heart, Home, Settings, LogIn, LogOut, User, BarChart3 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 
@@ -11,7 +11,7 @@ const Navbar = () => {
     { to: "/", label: "หน้าแรก", icon: Home },
     { to: "/search", label: "ค้นหา", icon: Search },
     { to: "/favorites", label: "ชั้นหนังสือ", icon: Heart },
-    ...(isAdmin ? [{ to: "/admin", label: "จัดการ", icon: Settings }] : []),
+    ...(isAdmin ? [{ to: "/dashboard", label: "สถิติ", icon: BarChart3 }, { to: "/admin", label: "จัดการ", icon: Settings }] : []),
   ];
 
   return (
