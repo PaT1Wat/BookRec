@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { BookOpen, Search, Heart, Home, Settings, LogIn, LogOut, User } from "lucide-react";
+import { BookOpen, Search, Heart, Home, Settings, LogIn, LogOut, User, BarChart3 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 
