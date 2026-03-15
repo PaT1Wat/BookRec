@@ -44,7 +44,14 @@ const Navbar = () => {
 
           {user ? (
             <div className="flex items-center gap-2 ml-2">
-              <div className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-1.5">
+              <Link
+                to="/profile"
+                className={`flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors ${
+                  location.pathname === "/profile"
+                    ? "bg-primary/10 ring-1 ring-primary/30"
+                    : "bg-secondary hover:bg-secondary/80"
+                }`}
+              >
                 {profile?.avatar_url ? (
                   <img src={profile.avatar_url} alt="" className="h-6 w-6 rounded-full object-cover" />
                 ) : (
@@ -53,7 +60,7 @@ const Navbar = () => {
                 <span className="hidden sm:inline text-xs font-medium text-foreground">
                   {profile?.display_name || user.email?.split("@")[0]}
                 </span>
-              </div>
+              </Link>
               <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
                 <LogOut className="h-4 w-4" />
               </Button>
