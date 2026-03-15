@@ -48,6 +48,7 @@ const App = () => (
               <Route path="/favorites" element={<FavoritesPage />} />
               <Route path="/auth" element={<AuthPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
               <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
