@@ -5,6 +5,7 @@ import { genres as allGenres, type Book, type BookType, type Genre } from "@/dat
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import CoverUpload from "@/components/CoverUpload";
 
 type FormData = Omit<Book, "id">;
 
