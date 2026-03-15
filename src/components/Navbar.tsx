@@ -11,7 +11,7 @@ const Navbar = () => {
     { to: "/", label: "หน้าแรก", icon: Home },
     { to: "/search", label: "ค้นหา", icon: Search },
     { to: "/favorites", label: "ชั้นหนังสือ", icon: Heart },
-    ...(isAdmin ? [{ to: "/admin", label: "จัดการ", icon: Settings }] : []),
+    ...(isAdmin ? [{ to: "/dashboard", label: "สถิติ", icon: BarChart3 }, { to: "/admin", label: "จัดการ", icon: Settings }] : []),
   ];
 
   return (
