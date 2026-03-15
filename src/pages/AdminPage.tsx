@@ -211,9 +211,8 @@ const AdminPage = () => {
                 <label className="text-xs font-medium text-muted-foreground">จำนวนรีวิว</label>
                 <Input type="number" value={form.reviewCount} onChange={e => setForm({ ...form, reviewCount: Number(e.target.value) })} />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">URL รูปปก</label>
-                <Input value={form.coverUrl} onChange={e => setForm({ ...form, coverUrl: e.target.value })} />
+              <div className="space-y-1 sm:col-span-2">
+                <CoverUpload value={form.coverUrl} onChange={(url) => setForm({ ...form, coverUrl: url })} />
               </div>
             </div>
 
