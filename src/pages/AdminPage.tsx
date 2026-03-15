@@ -280,12 +280,6 @@ const AdminPage = () => {
               </label>
             </div>
 
-            {form.coverUrl && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">ตัวอย่างปก</p>
-                <img src={form.coverUrl} alt="preview" className="h-32 w-auto rounded-lg object-cover" />
-              </div>
-            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowForm(false)}>ยกเลิก</Button>
