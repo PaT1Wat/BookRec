@@ -5,6 +5,7 @@ import { genres as allGenres, type Book, type BookType, type Genre } from "@/dat
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import CoverUpload from "@/components/CoverUpload";
 
 type FormData = Omit<Book, "id">;
 
@@ -210,9 +211,8 @@ const AdminPage = () => {
                 <label className="text-xs font-medium text-muted-foreground">จำนวนรีวิว</label>
                 <Input type="number" value={form.reviewCount} onChange={e => setForm({ ...form, reviewCount: Number(e.target.value) })} />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">URL รูปปก</label>
-                <Input value={form.coverUrl} onChange={e => setForm({ ...form, coverUrl: e.target.value })} />
+              <div className="space-y-1 sm:col-span-2">
+                <CoverUpload value={form.coverUrl} onChange={(url) => setForm({ ...form, coverUrl: url })} />
               </div>
             </div>
 
@@ -280,12 +280,6 @@ const AdminPage = () => {
               </label>
             </div>
 
-            {form.coverUrl && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">ตัวอย่างปก</p>
-                <img src={form.coverUrl} alt="preview" className="h-32 w-auto rounded-lg object-cover" />
-              </div>
-            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowForm(false)}>ยกเลิก</Button>
