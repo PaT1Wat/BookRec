@@ -14,6 +14,7 @@ import { type Book } from "@/data/books";
 ======================= */
 export type FormData = {
   title: string;
+  titleEn?: string;
   description?: string;
   coverUrl?: string;
   publishDate?: string;
@@ -50,7 +51,7 @@ function mapRow(row: any): Book {
   return {
     id: String(row.bookID),
     title: row.title ?? "",
-    titleEn: "",
+    titleEn: row.titleEn ?? "",
     description: row.description ?? "",
     coverUrl: row.coverImage ?? "",
     publishDate: row.publishDate ?? "",
@@ -155,6 +156,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
         `
         bookID,
         title,
+        titleEn,
         description,
         coverImage,
         publishDate,
@@ -213,6 +215,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
         .from("books" as any)
         .insert({
           title: book.title,
+          titleEn: book.titleEn,
           description: book.description,
           coverImage: book.coverUrl,
           publishDate: book.publishDate,
@@ -259,6 +262,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
         .from("books" as any)
         .update({
           title: book.title,
+          titleEn: book.titleEn,
           description: book.description,
           coverImage: book.coverUrl,
           publishDate: book.publishDate,

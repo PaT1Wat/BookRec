@@ -1,73 +1,234 @@
-# Welcome to your Lovable project
+# 📚 BookRec — ระบบแนะนำหนังสือด้วย AI
 
-## Project info
+ระบบแนะนำหนังสือมังงะ นิยาย และไลท์โนเวล พัฒนาด้วย React TypeScript + Python FastAPI + LightFM + AI Chatbot
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+---
 
-## How can I edit this code?
+## 🛠️ เทคโนโลยีที่ใช้
 
-There are several ways of editing your application.
+| ส่วน | เทคโนโลยี |
+|------|-----------|
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui |
+| Backend | Python 3.10, FastAPI, LightFM |
+| Database | Supabase (PostgreSQL) |
+| AI Chatbot | OpenRouter API |
+| Auth | Supabase Auth |
 
-**Use Lovable**
+---
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## 📁 โครงสร้างโปรเจกต์
 
-Changes made via Lovable will be committed automatically to this repo.
+```
+readwisely-ai/
+├── src/                    # React Frontend
+│   ├── components/         # UI Components
+│   ├── context/            # AuthContext, BooksContext
+│   ├── pages/              # หน้าต่าง ๆ
+│   └── lib/                # Utilities
+├── backend/                # Python FastAPI Backend
+│   ├── main.py             # API Endpoints
+│   ├── recommend.py        # LightFM Model
+│   ├── requirements.txt    # Python Dependencies
+│   └── .env                # Environment Variables (ไม่ commit)
+├── .env                    # Frontend Environment Variables
+└── package.json
+```
 
-**Use your preferred IDE**
+---
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## ⚙️ การติดตั้งและรันโปรเจกต์
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### สิ่งที่ต้องมีก่อน
 
-Follow these steps:
+- [Node.js](https://nodejs.org/) >= 18
+- [Python](https://www.python.org/) >= 3.10
+- บัญชี [Supabase](https://supabase.com)
+- บัญชี [OpenRouter](https://openrouter.ai)
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
+---
+
+### 1. Clone โปรเจกต์
+
+```bash
 git clone <YOUR_GIT_URL>
+cd readwisely-ai
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+---
 
-# Step 3: Install the necessary dependencies.
-npm i
+### 2. ติดตั้ง Frontend
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```bash
+# ติดตั้ง dependencies
+npm install
+
+# สร้างไฟล์ .env
+```
+
+สร้างไฟล์ `.env` ที่ root ของโปรเจกต์:
+
+```dotenv
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxxx
+```
+
+---
+
+### 3. ติดตั้ง Backend
+
+```bash
+# เข้าไปในโฟลเดอร์ backend
+cd backend
+
+# สร้าง Virtual Environment
+python -m venv venv
+
+# เปิดใช้ venv (Windows)
+venv\Scripts\activate
+
+# เปิดใช้ venv (Mac/Linux)
+source venv/bin/activate
+
+# ติดตั้ง dependencies
+pip install -r requirements.txt
+```
+
+สร้างไฟล์ `backend/.env`:
+
+```dotenv
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_KEY=eyJ...   # service_role key
+OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+---
+
+### 4. ตั้งค่าฐานข้อมูล Supabase
+
+1. เข้า [Supabase Dashboard](https://supabase.com/dashboard)
+2. เปิด **SQL Editor**
+3. Copy SQL จากไฟล์ `database/schema.sql` แล้วรัน
+
+---
+
+## 🚀 การรันโปรเจกต์
+
+ต้องรัน **2 terminal พร้อมกัน**
+
+### Terminal 1 — รัน Backend
+
+```bash
+cd backend
+
+# เปิด venv (Windows)
+venv\Scripts\activate
+
+# เปิด venv (Mac/Linux)
+source venv/bin/activate
+
+# รัน FastAPI Server
+uvicorn main:app --reload
+```
+
+Backend จะรันที่ → **http://localhost:8000**
+
+ดู API Docs ได้ที่ → **http://localhost:8000/docs**
+
+---
+
+### Terminal 2 — รัน Frontend
+
+```bash
+# กลับไปที่ root ก่อน
+cd ..
+
+# รัน React App
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Frontend จะรันที่ → **http://localhost:5173**
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## 🔑 การขอ API Keys
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Supabase Keys
 
-## What technologies are used for this project?
+1. เข้า [Supabase Dashboard](https://supabase.com/dashboard)
+2. เลือกโปรเจกต์ → **Project Settings → API**
+3. Copy:
+   - `Project URL` → ใส่ใน `SUPABASE_URL` และ `VITE_SUPABASE_URL`
+   - `anon public` → ใส่ใน `VITE_SUPABASE_PUBLISHABLE_KEY`
+   - `service_role` → ใส่ใน `SUPABASE_KEY` (Backend เท่านั้น ❗)
 
-This project is built with:
+### OpenRouter API Key
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+1. เข้า [https://openrouter.ai](https://openrouter.ai)
+2. ไปที่ **API Keys → Create**
+3. Copy key → ใส่ใน `OPENROUTER_API_KEY`
 
-## How can I deploy this project?
+---
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## 📌 Endpoints ของ Backend
 
-## Can I connect a custom domain to my Lovable project?
+| Method | Endpoint | คำอธิบาย |
+|--------|----------|-----------|
+| GET | `/` | ตรวจสอบสถานะ Server |
+| GET | `/recommend/{user_id}` | แนะนำหนังสือสำหรับ User |
+| POST | `/chat` | สนทนากับ AI Chatbot |
 
-Yes, you can!
+### ตัวอย่าง Request /chat
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```json
+POST http://localhost:8000/chat
+{
+  "message": "แนะนำมังงะแนวแฟนตาซีหน่อย",
+  "books": [
+    { "title": "One Piece", "type": "manga", "tags": ["ผจญภัย"] }
+  ]
+}
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+---
+
+## 👤 บทบาทผู้ใช้งาน
+
+| Role | สิทธิ์ |
+|------|--------|
+| Guest | ดูหนังสือ ค้นหา |
+| User | บันทึกหนังสือโปรด รีวิว ใช้ Chatbot |
+| Admin | จัดการหนังสือ ดู Dashboard สถิติ |
+
+### ตั้งค่า Admin
+
+รัน SQL นี้ใน Supabase SQL Editor:
+
+```sql
+UPDATE public.user
+SET role = 'admin'
+WHERE email = 'your-email@example.com';
+```
+
+---
+
+## ❗ ปัญหาที่พบบ่อย
+
+**Backend รันแล้ว import error**
+```bash
+pip install -r requirements.txt
+```
+
+**Frontend เชื่อม Supabase ไม่ได้**
+→ เช็คไฟล์ `.env` ว่า key ถูกต้องและไม่มีช่องว่างหน้าหลัง
+
+**Chatbot ตอบ error**
+→ เช็ค `OPENROUTER_API_KEY` ใน `backend/.env`
+
+**LightFM warning เรื่อง OpenMP**
+→ ไม่กระทบการทำงาน เป็นแค่ warning ปกติบน Windows
+
+---
+
+## 👨‍💻 ผู้พัฒนา
+
+นายปฏิวัติ เชียงมูล — สาขาวิชาวิทยาการคอมพิวเตอร์

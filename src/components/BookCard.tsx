@@ -85,6 +85,13 @@ const BookCard = ({ book }: BookCardProps) => {
           </h3>
         </Link>
 
+        {/* ✅ ชื่ออังกฤษ — เพิ่มตรงนี้ */}
+        {book.titleEn && (
+          <p className="text-xs text-muted-foreground truncate italic">
+            {book.titleEn}
+          </p>
+        )}
+
         {/* ผู้แต่ง */}
         <p className="text-xs text-muted-foreground truncate">
           {book.authorName || book.author || "-"}

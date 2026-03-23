@@ -10,19 +10,6 @@ import CoverUpload from "@/components/CoverUpload";
 import { supabase } from "@/integrations/supabase/client";
 
 /* =======================
-   ✅ Types
-======================= */
-type Author = {
-  id: number;
-  name: string;
-};
-
-type Publisher = {
-  id: number;
-  name: string;
-};
-
-/* =======================
    ✅ FormData
 ======================= */
 type FormData = {
@@ -66,6 +53,74 @@ const GENRE_LIST = [
   "ชีวิตประจำวัน", "ผจญภัย", "จิตวิทยา",
 ];
 
+/* =======================
+   🔽 Dropdown Component
+======================= */
+const Dropdown = ({
+  label,
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  placeholder: string;
+  onChange: (val: string) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filtered = options.filter(o =>
+    o.toLowerCase().includes((search || value).toLowerCase())
+  );
+
+  return (
+    <div className="space-y-1 relative">
+      <label className="text-sm font-medium">{label}</label>
+      <Input
+        placeholder={placeholder}
+        value={value}
+        autoComplete="off"
+        onChange={e => {
+          onChange(e.target.value);
+          setSearch(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && (
+        <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border bg-white shadow-lg">
+          {filtered.length > 0 ? (
+            filtered.map(o => (
+              <li
+                key={o}
+                onMouseDown={() => {
+                  onChange(o);
+                  setSearch("");
+                  setOpen(false);
+                }}
+                className="cursor-pointer px-3 py-2 text-sm hover:bg-muted"
+              >
+                {o}
+              </li>
+            ))
+          ) : (
+            <li className="px-3 py-2 text-sm text-muted-foreground">
+              ไม่พบ — ใช้ชื่อที่พิมพ์ได้เลย
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+/* =======================
+   🏠 AdminPage
+======================= */
 const AdminPage = () => {
   const { books, addBook, updateBook, deleteBook } = useBooks();
   const { isAdmin, loading: authLoading } = useAuth();
@@ -77,6 +132,37 @@ const AdminPage = () => {
   const [form, setForm] = useState<FormData>(emptyForm);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Dropdown data
+  const [authors, setAuthors] = useState<string[]>([]);
+  const [publishers, setPublishers] = useState<string[]>([]);
+
+  /* =======================
+     📦 Fetch authors & publishers
+  ======================= */
+  useEffect(() => {
+  const fetchMeta = async () => {
+    const [{ data: pubData }, { data: bookData }] = await Promise.all([
+      supabase.from("publisher" as any).select('"publisherName"'),
+      supabase.from("author" as any).select('"authorName"'),
+    ]);
+
+    if (pubData) {
+      const uniquePublishers = [...new Set(
+        (pubData as any[]).map(p => p.publisherName).filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b, "th"));
+      setPublishers(uniquePublishers);
+    }
+
+    if (bookData) {
+      const uniqueAuthors = [...new Set(
+        (bookData as any[]).map(b => b.authorName).filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b, "th"));
+      setAuthors(uniqueAuthors);
+    }
+  };
+  fetchMeta();
+}, [books]); // refetch เมื่อ books เปลี่ยน
 
   /* =======================
      🔒 Protect Admin
@@ -153,22 +239,27 @@ const AdminPage = () => {
 
     setSaving(true);
 
-    // แปลง tags string → array
     const tagsArray = form.tags
       .split(",")
       .map(t => t.trim())
       .filter(Boolean);
 
-    // รวม genres + tags เป็น tags array
     const allTags = [...new Set([...form.genres, ...tagsArray])];
 
     try {
       const payload = {
         title: form.title,
+        titleEn: form.titleEn,
         description: form.description,
         coverUrl: form.coverUrl,
         authorName: form.authorName,
         publisherName: form.publisherName,
+        price: form.price,
+        rating: form.rating,
+        reviewCount: form.reviewCount,
+        type: form.type,
+        isNew: form.isNew,
+        isPopular: form.isPopular,
         tags: allTags,
       };
 
@@ -333,24 +424,22 @@ const AdminPage = () => {
                 </div>
               </div>
 
-              {/* ผู้แต่ง / สำนักพิมพ์ */}
+              {/* ผู้แต่ง / สำนักพิมพ์ — Dropdown */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">ผู้แต่ง *</label>
-                  <Input
-                    placeholder="ชื่อผู้แต่ง"
-                    value={form.authorName}
-                    onChange={e => setForm({ ...form, authorName: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">สำนักพิมพ์</label>
-                  <Input
-                    placeholder="ชื่อสำนักพิมพ์"
-                    value={form.publisherName}
-                    onChange={e => setForm({ ...form, publisherName: e.target.value })}
-                  />
-                </div>
+                <Dropdown
+                  label="ผู้แต่ง *"
+                  value={form.authorName}
+                  options={authors}
+                  placeholder="ชื่อผู้แต่ง"
+                  onChange={val => setForm({ ...form, authorName: val })}
+                />
+                <Dropdown
+                  label="สำนักพิมพ์"
+                  value={form.publisherName}
+                  options={publishers}
+                  placeholder="ชื่อสำนักพิมพ์"
+                  onChange={val => setForm({ ...form, publisherName: val })}
+                />
               </div>
 
               {/* ราคา / คะแนน */}
