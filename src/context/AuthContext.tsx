@@ -35,12 +35,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchUserData = useCallback(async (userId: string) => {
-    const [profileRes, roleRes] = await Promise.all([
-      supabase.from("profiles").select("display_name, avatar_url").eq("user_id", userId).single(),
-      supabase.rpc("has_role", { _user_id: userId, _role: "admin" }),
+    const [profileRes, userRes] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("display_name, avatar_url")
+        .eq("userID", userId) // 🔥 ตรง schema ใหม่
+        .single(),
+
+      supabase
+        .from("user")
+        .select("role")
+        .eq("id", userId)
+        .single(),
     ]);
-    if (profileRes.data) setProfile(profileRes.data);
-    setIsAdmin(roleRes.data === true);
+
+    if (profileRes.data) {
+      setProfile(profileRes.data);
+    }
+
+    setIsAdmin(userRes.data?.role === "admin");
   }, []);
 
   useEffect(() => {

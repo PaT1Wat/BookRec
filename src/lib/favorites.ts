@@ -1,37 +1,94 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
 
-const FAVORITES_KEY = "book-favorites";
-
-export function getFavorites(): string[] {
-  const stored = localStorage.getItem(FAVORITES_KEY);
-  return stored ? JSON.parse(stored) : [];
-}
-
-export function toggleFavorite(bookId: string): string[] {
-  const favorites = getFavorites();
-  const index = favorites.indexOf(bookId);
-  if (index > -1) {
-    favorites.splice(index, 1);
-  } else {
-    favorites.push(bookId);
-  }
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
-  return favorites;
-}
-
-export function isFavorite(bookId: string): boolean {
-  return getFavorites().includes(bookId);
-}
-
+/* =======================
+   Hook
+======================= */
 export function useFavorites() {
-  const [favorites, setFavorites] = useState<string[]>(getFavorites());
+  const { user } = useAuth();
 
-  const toggle = (bookId: string) => {
-    const updated = toggleFavorite(bookId);
-    setFavorites([...updated]);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  /* =======================
+     📥 Fetch
+  ======================= */
+  const fetchFavorites = useCallback(async () => {
+    if (!user) {
+      setFavorites([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("favorite")
+      .select("bookID")
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error("Favorites error:", error);
+    } else {
+      setFavorites(
+        (data ?? [])
+          .filter((f) => f.bookID !== null)
+          .map((f) => String(f.bookID))
+      );
+    }
+
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    fetchFavorites();
+  }, [fetchFavorites]);
+
+  /* =======================
+     ❤️ Toggle
+  ======================= */
+  const toggle = useCallback(
+    async (bookId: string) => {
+      if (!user) {
+        alert("กรุณาเข้าสู่ระบบก่อน");
+        return;
+      }
+
+      const numericID = Number(bookId);
+      const isFav = favorites.includes(bookId);
+
+      if (isFav) {
+        await supabase
+          .from("favorite")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("bookID", numericID);
+
+        setFavorites((prev) => prev.filter((id) => id !== bookId));
+      } else {
+        await supabase.from("favorite").insert({
+          user_id: user.id,
+          bookID: numericID,
+        });
+
+        setFavorites((prev) => [...prev, bookId]);
+      }
+    },
+    [favorites, user]
+  );
+
+  /* =======================
+     ✅ Check
+  ======================= */
+  const check = useCallback(
+    (bookId: string) => favorites.includes(bookId),
+    [favorites]
+  );
+
+  return {
+    favorites,
+    toggle,
+    check,
+    loading,
+    refetch: fetchFavorites,
   };
-
-  const check = (bookId: string) => favorites.includes(bookId);
-
-  return { favorites, toggle, check };
 }

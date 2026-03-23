@@ -1,162 +1,284 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Pencil, Trash2, X, Save, Search } from "lucide-react";
 import { useBooks } from "@/context/BooksContext";
-import { genres as allGenres, type Book, type BookType, type Genre } from "@/data/books";
+import { useAuth } from "@/context/AuthContext";
+import { type Book } from "@/data/books";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import CoverUpload from "@/components/CoverUpload";
+import { supabase } from "@/integrations/supabase/client";
 
-type FormData = Omit<Book, "id">;
+/* =======================
+   ✅ Types
+======================= */
+type Author = {
+  id: number;
+  name: string;
+};
+
+type Publisher = {
+  id: number;
+  name: string;
+};
+
+/* =======================
+   ✅ FormData
+======================= */
+type FormData = {
+  title: string;
+  titleEn: string;
+  authorName: string;
+  publisherName: string;
+  price: number;
+  rating: number;
+  reviewCount: number;
+  coverUrl: string;
+  type: string;
+  genres: string[];
+  tags: string;
+  description: string;
+  isNew: boolean;
+  isPopular: boolean;
+};
 
 const emptyForm: FormData = {
   title: "",
   titleEn: "",
-  author: "",
-  publisher: "",
-  type: "manga",
-  genres: [],
-  tags: [],
-  description: "",
-  coverUrl: "",
+  authorName: "",
+  publisherName: "",
   price: 0,
   rating: 0,
   reviewCount: 0,
+  coverUrl: "",
+  type: "manga",
+  genres: [],
+  tags: "",
+  description: "",
   isNew: false,
   isPopular: false,
 };
 
+const GENRE_LIST = [
+  "โรแมนติก", "แฟนตาซี", "แอ็กชัน", "สืบสวน",
+  "คอมเมดี้", "ดราม่า", "สยองขวัญ", "ต่างโลก",
+  "อิเซไค", "โชเน็น", "โชโจ", "วาย",
+  "ชีวิตประจำวัน", "ผจญภัย", "จิตวิทยา",
+];
+
 const AdminPage = () => {
   const { books, addBook, updateBook, deleteBook } = useBooks();
+  const { isAdmin, loading: authLoading } = useAuth();
   const { toast } = useToast();
+
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(emptyForm);
-  const [tagsInput, setTagsInput] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const filtered = books.filter(
-    b =>
-      b.title.toLowerCase().includes(search.toLowerCase()) ||
-      b.author.toLowerCase().includes(search.toLowerCase())
+  /* =======================
+     🔒 Protect Admin
+  ======================= */
+  if (authLoading) return <div className="p-10 text-center">กำลังโหลด...</div>;
+  if (!isAdmin) {
+    return (
+      <div className="p-10 text-center text-red-500">
+        ❌ คุณไม่มีสิทธิ์เข้าหน้านี้
+      </div>
+    );
+  }
+
+  /* =======================
+     🔍 Filter
+  ======================= */
+  const filtered = books.filter(b =>
+    (b.title || "").toLowerCase().includes(search.toLowerCase())
   );
 
+  /* =======================
+     🏷️ Toggle Genre
+  ======================= */
+  const toggleGenre = (genre: string) => {
+    setForm(prev => ({
+      ...prev,
+      genres: prev.genres.includes(genre)
+        ? prev.genres.filter(g => g !== genre)
+        : [...prev.genres, genre],
+    }));
+  };
+
+  /* =======================
+     ➕ Add
+  ======================= */
   const openAdd = () => {
     setEditingId(null);
     setForm(emptyForm);
-    setTagsInput("");
     setShowForm(true);
   };
 
+  /* =======================
+     ✏️ Edit
+  ======================= */
   const openEdit = (book: Book) => {
     setEditingId(book.id);
-    const { id, ...rest } = book;
-    setForm(rest);
-    setTagsInput(book.tags.join(", "));
+    setForm({
+      title: book.title || "",
+      titleEn: book.titleEn || "",
+      authorName: book.authorName || "",
+      publisherName: book.publisherName || "",
+      price: book.price ?? 0,
+      rating: book.rating ?? 0,
+      reviewCount: book.reviewCount ?? 0,
+      coverUrl: book.coverUrl || "",
+      type: book.type || "manga",
+      genres: book.genres || [],
+      tags: (book.tags || []).join(", "),
+      description: book.description || "",
+      isNew: book.isNew ?? false,
+      isPopular: book.isPopular ?? false,
+    });
     setShowForm(true);
   };
 
+  /* =======================
+     💾 Save
+  ======================= */
   const handleSave = async () => {
-    if (!form.title || !form.author) {
-      toast({ title: "กรุณากรอกชื่อเรื่องและผู้แต่ง", variant: "destructive" });
+    if (!form.title.trim()) {
+      toast({ title: "กรุณากรอกชื่อเรื่อง", variant: "destructive" });
       return;
     }
+
     setSaving(true);
+
+    // แปลง tags string → array
+    const tagsArray = form.tags
+      .split(",")
+      .map(t => t.trim())
+      .filter(Boolean);
+
+    // รวม genres + tags เป็น tags array
+    const allTags = [...new Set([...form.genres, ...tagsArray])];
+
     try {
-      const data = { ...form, tags: tagsInput.split(",").map(t => t.trim()).filter(Boolean) };
+      const payload = {
+        title: form.title,
+        description: form.description,
+        coverUrl: form.coverUrl,
+        authorName: form.authorName,
+        publisherName: form.publisherName,
+        tags: allTags,
+      };
+
       if (editingId) {
-        await updateBook(editingId, data);
+        await updateBook(editingId, payload);
         toast({ title: "แก้ไขหนังสือสำเร็จ ✅" });
       } else {
-        await addBook(data);
+        await addBook(payload);
         toast({ title: "เพิ่มหนังสือสำเร็จ ✅" });
       }
+
       setShowForm(false);
+      setForm(emptyForm);
+      setEditingId(null);
     } catch (err: any) {
-      toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: err?.message || "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
   };
 
+  /* =======================
+     🗑️ Delete
+  ======================= */
   const handleDelete = async (id: string) => {
     try {
       await deleteBook(id);
       setDeleteConfirm(null);
       toast({ title: "ลบหนังสือสำเร็จ 🗑️" });
     } catch (err: any) {
-      toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: err?.message || "Unknown error",
+        variant: "destructive",
+      });
     }
-  };
-
-  const toggleGenre = (g: Genre) => {
-    setForm(prev => ({
-      ...prev,
-      genres: prev.genres.includes(g) ? prev.genres.filter(x => x !== g) : [...prev.genres, g],
-    }));
   };
 
   return (
     <div className="container py-8">
+      {/* HEADER */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold font-display text-foreground">🛠️ จัดการหนังสือ</h1>
-          <p className="text-sm text-muted-foreground mt-1">เพิ่ม แก้ไข ลบหนังสือในระบบ ({books.length} เล่ม)</p>
+          <h1 className="text-3xl font-bold">🛠️ จัดการหนังสือ</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            ทั้งหมด {books.length} เล่ม
+          </p>
         </div>
         <Button onClick={openAdd} className="gap-2">
           <Plus className="h-4 w-4" /> เพิ่มหนังสือ
         </Button>
       </div>
 
+      {/* SEARCH */}
       <div className="relative mb-6">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาชื่อเรื่องหรือผู้แต่ง..." className="pl-9" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="ค้นหาชื่อหนังสือ..."
+          className="pl-9"
+        />
       </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
+      {/* TABLE */}
+      <div className="rounded-xl border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-secondary">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">ปก</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">ชื่อเรื่อง</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">ผู้แต่ง</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">ประเภท</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">ราคา</th>
-              <th className="px-4 py-3 text-right font-medium text-muted-foreground">จัดการ</th>
+              <th className="px-4 py-3 text-left">ปก</th>
+              <th className="px-4 py-3 text-left">ชื่อหนังสือ</th>
+              <th className="px-4 py-3 text-left">ผู้แต่ง</th>
+              <th className="px-4 py-3 text-left">สำนักพิมพ์</th>
+              <th className="px-4 py-3 text-right">จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(book => (
-              <tr key={book.id} className="border-t border-border hover:bg-muted/30 transition-colors">
+              <tr key={book.id} className="border-t hover:bg-muted/30">
                 <td className="px-4 py-3">
-                  <img src={book.coverUrl} alt={book.title} className="h-14 w-10 rounded object-cover" />
+                  <img
+                    src={book.coverUrl || "/placeholder.svg"}
+                    alt={book.title || "book cover"}
+                    className="h-14 w-10 object-cover rounded"
+                  />
                 </td>
-                <td className="px-4 py-3">
-                  <p className="font-medium text-foreground">{book.title}</p>
-                  {book.titleEn && <p className="text-xs text-muted-foreground">{book.titleEn}</p>}
-                </td>
-                <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{book.author}</td>
-                <td className="px-4 py-3 hidden sm:table-cell">
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                    {book.type === "manga" ? "มังงะ" : "นิยาย"}
-                  </span>
-                </td>
-                <td className="px-4 py-3 hidden lg:table-cell text-foreground font-medium">฿{book.price}</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 font-medium">{book.title}</td>
+                <td className="px-4 py-3 text-muted-foreground">{book.authorName || "-"}</td>
+                <td className="px-4 py-3 text-muted-foreground">{book.publisherName || "-"}</td>
+                <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(book)}>
-                      <Pencil className="h-4 w-4 text-primary" />
+                    <Button size="icon" variant="ghost" onClick={() => openEdit(book)}>
+                      <Pencil className="h-4 w-4" />
                     </Button>
                     {deleteConfirm === book.id ? (
-                      <div className="flex items-center gap-1">
-                        <Button variant="destructive" size="sm" onClick={() => handleDelete(book.id)}>ยืนยัน</Button>
-                        <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>ยกเลิก</Button>
-                      </div>
+                      <>
+                        <Button size="sm" variant="destructive" onClick={() => handleDelete(book.id)}>
+                          ยืนยัน
+                        </Button>
+                        <Button size="sm" onClick={() => setDeleteConfirm(null)}>
+                          ยกเลิก
+                        </Button>
+                      </>
                     ) : (
-                      <Button variant="ghost" size="icon" onClick={() => setDeleteConfirm(book.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                      <Button size="icon" variant="ghost" onClick={() => setDeleteConfirm(book.id)}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     )}
                   </div>
@@ -165,16 +287,22 @@ const AdminPage = () => {
             ))}
           </tbody>
         </table>
+
         {filtered.length === 0 && (
-          <div className="py-12 text-center text-muted-foreground">ไม่พบหนังสือ</div>
+          <div className="py-10 text-center text-muted-foreground">
+            ไม่พบข้อมูล
+          </div>
         )}
       </div>
 
+      {/* MODAL */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-4 scrollbar-thin">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold font-display text-foreground">
+        <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-6 border-b sticky top-0 bg-white z-10">
+              <h2 className="text-xl font-bold">
                 {editingId ? "✏️ แก้ไขหนังสือ" : "📘 เพิ่มหนังสือใหม่"}
               </h2>
               <Button variant="ghost" size="icon" onClick={() => setShowForm(false)}>
@@ -182,109 +310,193 @@ const AdminPage = () => {
               </Button>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">ชื่อเรื่อง (ไทย) *</label>
-                <Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+            {/* Modal Body */}
+            <div className="p-6 space-y-5">
+
+              {/* ชื่อเรื่อง */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">ชื่อเรื่อง (ไทย) *</label>
+                  <Input
+                    placeholder="ชื่อภาษาไทย"
+                    value={form.title}
+                    onChange={e => setForm({ ...form, title: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">ชื่อเรื่อง (EN)</label>
+                  <Input
+                    placeholder="ชื่อภาษาอังกฤษ"
+                    value={form.titleEn}
+                    onChange={e => setForm({ ...form, titleEn: e.target.value })}
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">ชื่อเรื่อง (EN)</label>
-                <Input value={form.titleEn || ""} onChange={e => setForm({ ...form, titleEn: e.target.value })} />
+
+              {/* ผู้แต่ง / สำนักพิมพ์ */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">ผู้แต่ง *</label>
+                  <Input
+                    placeholder="ชื่อผู้แต่ง"
+                    value={form.authorName}
+                    onChange={e => setForm({ ...form, authorName: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">สำนักพิมพ์</label>
+                  <Input
+                    placeholder="ชื่อสำนักพิมพ์"
+                    value={form.publisherName}
+                    onChange={e => setForm({ ...form, publisherName: e.target.value })}
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">ผู้แต่ง *</label>
-                <Input value={form.author} onChange={e => setForm({ ...form, author: e.target.value })} />
+
+              {/* ราคา / คะแนน */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">ราคา (บาท)</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={form.price}
+                    onChange={e => setForm({ ...form, price: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">คะแนน (0-5)</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    value={form.rating}
+                    onChange={e => setForm({ ...form, rating: Number(e.target.value) })}
+                  />
+                </div>
               </div>
+
+              {/* จำนวนรีวิว */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">สำนักพิมพ์</label>
-                <Input value={form.publisher} onChange={e => setForm({ ...form, publisher: e.target.value })} />
+                <label className="text-sm font-medium">จำนวนรีวิว</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.reviewCount}
+                  onChange={e => setForm({ ...form, reviewCount: Number(e.target.value) })}
+                  className="w-1/2"
+                />
               </div>
+
+              {/* รูปปก */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">ราคา (บาท)</label>
-                <Input type="number" value={form.price} onChange={e => setForm({ ...form, price: Number(e.target.value) })} />
+                <label className="text-sm font-medium">รูปปก</label>
+                <CoverUpload
+                  value={form.coverUrl}
+                  onChange={(url) => setForm({ ...form, coverUrl: url })}
+                />
               </div>
+
+              {/* ประเภท */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">ประเภท</label>
+                <div className="flex gap-2">
+                  {[
+                    { value: "manga", label: "มังงะ" },
+                    { value: "novel", label: "นิยาย" },
+                    { value: "lightnovel", label: "ไลท์โนเวล" },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setForm({ ...form, type: opt.value })}
+                      className={`rounded-full px-5 py-2 text-sm font-medium transition-colors ${
+                        form.type === opt.value
+                          ? "bg-primary text-white"
+                          : "bg-secondary text-secondary-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* แนว */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">แนว (เลือกได้หลายแนว)</label>
+                <div className="flex flex-wrap gap-2">
+                  {GENRE_LIST.map(genre => (
+                    <button
+                      key={genre}
+                      type="button"
+                      onClick={() => toggleGenre(genre)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                        form.genres.includes(genre)
+                          ? "bg-primary text-white"
+                          : "bg-secondary text-secondary-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {genre}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* แท็ก */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">คะแนน (0-5)</label>
-                <Input type="number" step="0.1" min="0" max="5" value={form.rating} onChange={e => setForm({ ...form, rating: Number(e.target.value) })} />
+                <label className="text-sm font-medium">แท็ก (คั่นด้วย comma)</label>
+                <Input
+                  placeholder="เช่น อสูร, ดาบ, ครอบครัว"
+                  value={form.tags}
+                  onChange={e => setForm({ ...form, tags: e.target.value })}
+                />
               </div>
+
+              {/* เรื่องย่อ */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">จำนวนรีวิว</label>
-                <Input type="number" value={form.reviewCount} onChange={e => setForm({ ...form, reviewCount: Number(e.target.value) })} />
+                <label className="text-sm font-medium">เรื่องย่อ</label>
+                <textarea
+                  placeholder="เรื่องย่อ..."
+                  value={form.description}
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                  className="w-full border rounded-md p-2 text-sm min-h-[80px] resize-y"
+                  rows={3}
+                />
               </div>
-              <div className="space-y-1 sm:col-span-2">
-                <CoverUpload value={form.coverUrl} onChange={(url) => setForm({ ...form, coverUrl: url })} />
+
+              {/* Checkbox */}
+              <div className="flex gap-6">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.isNew}
+                    onChange={e => setForm({ ...form, isNew: e.target.checked })}
+                    className="rounded"
+                  />
+                  มาใหม่
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.isPopular}
+                    onChange={e => setForm({ ...form, isPopular: e.target.checked })}
+                    className="rounded"
+                  />
+                  ยอดนิยม
+                </label>
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">ประเภท</label>
-              <div className="flex gap-2">
-                {(["manga", "novel"] as BookType[]).map(t => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setForm({ ...form, type: t })}
-                    className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                      form.type === t ? "gradient-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
-                    }`}
-                  >
-                    {t === "manga" ? "มังงะ" : "นิยาย"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">แนว (เลือกได้หลายแนว)</label>
-              <div className="flex flex-wrap gap-2">
-                {allGenres.map(g => (
-                  <button
-                    key={g}
-                    type="button"
-                    onClick={() => toggleGenre(g)}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                      form.genres.includes(g)
-                        ? "gradient-primary text-primary-foreground"
-                        : "bg-secondary text-secondary-foreground hover:bg-primary/10"
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">แท็ก (คั่นด้วย comma)</label>
-              <Input value={tagsInput} onChange={e => setTagsInput(e.target.value)} placeholder="เช่น อสูร, ดาบ, ครอบครัว" />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">เรื่องย่อ</label>
-              <textarea
-                value={form.description}
-                onChange={e => setForm({ ...form, description: e.target.value })}
-                rows={3}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <label className="flex items-center gap-2 text-sm text-foreground">
-                <input type="checkbox" checked={form.isNew || false} onChange={e => setForm({ ...form, isNew: e.target.checked })} className="accent-primary" />
-                มาใหม่
-              </label>
-              <label className="flex items-center gap-2 text-sm text-foreground">
-                <input type="checkbox" checked={form.isPopular || false} onChange={e => setForm({ ...form, isPopular: e.target.checked })} className="accent-primary" />
-                ยอดนิยม
-              </label>
-            </div>
-
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setShowForm(false)}>ยกเลิก</Button>
-              <Button onClick={handleSave} disabled={saving} className="gap-2">
-                <Save className="h-4 w-4" /> {saving ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "เพิ่มหนังสือ"}
+            {/* Modal Footer */}
+            <div className="flex justify-end gap-2 p-6 border-t sticky bottom-0 bg-white">
+              <Button variant="outline" onClick={() => setShowForm(false)}>
+                ยกเลิก
+              </Button>
+              <Button onClick={handleSave} disabled={saving}>
+                <Save className="h-4 w-4 mr-1" />
+                {saving ? "กำลังบันทึก..." : editingId ? "บันทึก" : "เพิ่มหนังสือ"}
               </Button>
             </div>
           </div>
