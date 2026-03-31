@@ -209,7 +209,7 @@ const BookDetailPage = () => {
         <div className="space-y-6">
           <div>
             <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              {book.type === "manga" ? "มังงะ" : book.type === "lightnovel" ? "ไลท์โนเวล" : "นิยาย"}
+              {book.type === "manga" ? "มังงะ" : book.type === "light-novel" ? "ไลท์โนเวล" : "นิยาย"}
             </span>
             <h1 className="mt-3 text-3xl font-extrabold text-foreground font-display">{book.title}</h1>
             {book.titleEn && <p className="mt-1 text-lg text-muted-foreground">{book.titleEn}</p>}

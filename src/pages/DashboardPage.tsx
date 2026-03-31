@@ -44,7 +44,7 @@ const DashboardPage = () => {
   );
 
   const lightNovelCount = useMemo(
-    () => books.filter((b) => b.type === "lightnovel").length,
+    () => books.filter((b) => b.type === "light-novel").length,
     [books]
   );
 
