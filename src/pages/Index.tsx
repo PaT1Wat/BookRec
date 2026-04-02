@@ -1,6 +1,7 @@
 import { useBooks } from "@/context/BooksContext";
 import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
+import RecommendationSection from "@/components/RecommendationSection";
 import { genres } from "@/data/books";
 import { Link } from "react-router-dom";
 
