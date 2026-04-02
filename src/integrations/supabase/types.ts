@@ -101,6 +101,41 @@ export type Database = {
         }
         Relationships: []
       }
+      recommendations: {
+        Row: {
+          book_id: string
+          created_at: string
+          id: string
+          rec_type: string
+          score: number
+          user_id: string | null
+        }
+        Insert: {
+          book_id: string
+          created_at?: string
+          id?: string
+          rec_type?: string
+          score?: number
+          user_id?: string | null
+        }
+        Update: {
+          book_id?: string
+          created_at?: string
+          id?: string
+          rec_type?: string
+          score?: number
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recommendations_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reviews: {
         Row: {
           book_id: string
