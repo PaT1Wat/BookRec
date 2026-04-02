@@ -1,6 +1,7 @@
 import { useBooks } from "@/context/BooksContext";
 import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
+import RecommendationSection from "@/components/RecommendationSection";
 import { genres } from "@/data/books";
 import { Link } from "react-router-dom";
 
@@ -29,6 +30,7 @@ const Index = () => {
           ))}
         </div>
 
+        <RecommendationSection />
         <BookSection title="🔥 ยอดนิยม" subtitle="หนังสือที่ได้รับความนิยมสูงสุด" books={popularBooks} />
         <BookSection title="✨ มาใหม่" subtitle="หนังสือที่เพิ่งเข้ามาใหม่ในระบบ" books={newBooks} />
         <BookSection title="📖 มังงะ" subtitle="การ์ตูนญี่ปุ่นสุดฮิต" books={mangaBooks} />
