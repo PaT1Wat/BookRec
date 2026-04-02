@@ -30,6 +30,7 @@ const Index = () => {
           ))}
         </div>
 
+        <RecommendationSection />
         <BookSection title="🔥 ยอดนิยม" subtitle="หนังสือที่ได้รับความนิยมสูงสุด" books={popularBooks} />
         <BookSection title="✨ มาใหม่" subtitle="หนังสือที่เพิ่งเข้ามาใหม่ในระบบ" books={newBooks} />
         <BookSection title="📖 มังงะ" subtitle="การ์ตูนญี่ปุ่นสุดฮิต" books={mangaBooks} />
