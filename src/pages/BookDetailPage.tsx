@@ -3,6 +3,7 @@ import { Star, Heart, ArrowLeft, User, Building2 } from "lucide-react";
 import { useBooks } from "@/context/BooksContext";
 import { useFavorites } from "@/lib/favorites";
 import BookCard from "@/components/BookCard";
+import ReviewSection from "@/components/ReviewSection";
 
 const BookDetailPage = () => {
   const { id } = useParams();
