@@ -92,6 +92,30 @@ const DashboardPage = () => {
   }, [books]);
 
   const maxGenreCount = genreCounts[0]?.count || 1;
+  const totalBooks = books.length || 0;
+
+  // deterministic color for a genre based on its string
+  const genreColors = [
+    "#7c3aed",
+    "#60a5fa",
+    "#34d399",
+    "#fb7185",
+    "#f59e0b",
+    "#f97316",
+    "#ef4444",
+    "#06b6d4",
+    "#a78bfa",
+    "#10b981",
+  ];
+
+  const getGenreColor = (genre: string) => {
+    let h = 0;
+    for (let i = 0; i < genre.length; i++) {
+      h = (h << 5) - h + genre.charCodeAt(i);
+      h |= 0;
+    }
+    return genreColors[Math.abs(h) % genreColors.length];
+  };
 
   // ================= STAT CARDS =================
   const statCards = [
@@ -195,7 +219,8 @@ const DashboardPage = () => {
 
           <div className="space-y-3">
             {genreCounts.map(({ genre, count }) => {
-              const percent = Math.round((count / maxGenreCount) * 100);
+              const percent = totalBooks > 0 ? Math.round((count / totalBooks) * 100) : 0;
+              const color = getGenreColor(genre);
 
               return (
                 <div key={genre} className="flex items-center gap-3">
@@ -205,12 +230,20 @@ const DashboardPage = () => {
 
                   <div className="flex-1 h-5 rounded-full bg-muted overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-gradient-primary progress-bar"
-                      data-width={percent}
-                    />
+                      className="h-full rounded-full progress-bar transition-all duration-300"
+                      style={{
+                        width: `${percent}%`,
+                        background: `linear-gradient(90deg, ${color}, ${color}66)`,
+                      }}
+                    role="progressbar"
+                    aria-label={`แนว ${genre}`}
+                    aria-valuenow={Number(percent) || 0}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  />
                   </div>
 
-                  <span className="text-sm font-medium w-8 text-right">
+                  <span className="text-sm font-medium w-12 text-right">
                     {count}
                   </span>
                 </div>

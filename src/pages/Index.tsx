@@ -22,7 +22,7 @@ const GENRE_MAP: Record<string, string> = {
 const GENRE_LABELS = Object.keys(GENRE_MAP);
 
 const Index = () => {
-  const { books = [] } = useBooks();
+  const { books = [], loading, rawPayload, lastError } = useBooks();
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
 
   // ✅ filter ด้วย tagName จาก DB
@@ -44,6 +44,13 @@ const Index = () => {
       <HeroSection />
 
       <div className="container">
+        {/* Debug: if books failed to load, show a visible hint */}
+        {!loading && books.length === 0 && (
+          <div className="py-12 text-center text-destructive">
+            ไม่พบหนังสือในระบบ — ตรวจสอบค่าตัวแปรสภาพแวดล้อมของ Supabase
+            และดูคอนโซลเบราเซอร์ (ค้นหาข้อความ "BOOK DATA" / "BOOK ERROR").
+          </div>
+        )}
         {/* ✅ Genre pills — คลิกกรอง inline */}
         <div className="flex flex-wrap gap-2 py-6">
           {/* ปุ่ม "ทั้งหมด" */}
@@ -122,6 +129,26 @@ const Index = () => {
               ไม่พบหนังสือในแนว "{selectedGenre}"
             </div>
           )}
+
+        {/* Debug panel: show raw payload or error to help diagnose missing data */}
+        {!loading && books.length === 0 && (
+          <div className="mt-8 rounded border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+            <div className="font-semibold">Debug: ข้อมูลหนังสือไม่ถูกดึงมา</div>
+            {lastError && (
+              <div className="mt-2">
+                <div className="text-xs font-medium">BOOK ERROR:</div>
+                <pre className="mt-1 max-h-40 overflow-auto break-words text-xs">{JSON.stringify(lastError, null, 2)}</pre>
+              </div>
+            )}
+            {rawPayload && (
+              <div className="mt-2">
+                <div className="text-xs font-medium">RAW BOOK PAYLOAD:</div>
+                <pre className="mt-1 max-h-40 overflow-auto break-words text-xs">{JSON.stringify(rawPayload, null, 2)}</pre>
+              </div>
+            )}
+            <div className="mt-3 text-xs text-muted-foreground">ตรวจสอบค่าตัวแปรสภาพแวดล้อมของ Supabase และคอนโซล (ค้นหาข้อความ "Supabase URL" / "RAW BOOK PAYLOAD").</div>
+          </div>
+        )}
       </div>
     </div>
   );

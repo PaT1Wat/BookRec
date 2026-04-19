@@ -1,4 +1,4 @@
- type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -127,11 +127,39 @@ export type Database = {
             referencedColumns: ["authorID"]
           },
           {
+            foreignKeyName: "fk_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
             foreignKeyName: "fk_book_type"
             columns: ["type_id"]
             isOneToOne: false
             referencedRelation: "book_type"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_books_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_books_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+          {
+            foreignKeyName: "fk_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
           },
         ]
       }
@@ -157,6 +185,13 @@ export type Database = {
             columns: ["bookID"]
             isOneToOne: false
             referencedRelation: "books"
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "bookTag_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
             referencedColumns: ["bookID"]
           },
           {
@@ -195,6 +230,13 @@ export type Database = {
             referencedRelation: "books"
             referencedColumns: ["bookID"]
           },
+          {
+            foreignKeyName: "favorite_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
+            referencedColumns: ["bookID"]
+          },
         ]
       }
       interaction: {
@@ -225,6 +267,13 @@ export type Database = {
             columns: ["bookID"]
             isOneToOne: false
             referencedRelation: "books"
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "interaction_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
             referencedColumns: ["bookID"]
           },
         ]
@@ -301,6 +350,13 @@ export type Database = {
             referencedRelation: "books"
             referencedColumns: ["bookID"]
           },
+          {
+            foreignKeyName: "review_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
+            referencedColumns: ["bookID"]
+          },
         ]
       }
       tag: {
@@ -353,7 +409,63 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      books_with_details: {
+        Row: {
+          authorID: number | null
+          authorName: string | null
+          bookID: number | null
+          coverImage: string | null
+          description: string | null
+          publishDate: string | null
+          publisherID: number | null
+          publisherName: string | null
+          title: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "book_publisherID_fkey"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+          {
+            foreignKeyName: "books_authorID_fkey"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_books_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_books_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+          {
+            foreignKeyName: "fk_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+        ]
+      }
     }
     Functions: {
       [_ in never]: never

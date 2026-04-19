@@ -37,17 +37,24 @@ const SearchPage = () => {
 
       let queryBuilder = supabase
         .from("books")
-        .select(`
+        .select(
+          `
           bookID, title, titleEn, description, coverImage,
           publishDate, slug, is_new, is_popular, rating, review_count, price,
-          publisher:publisherID ( publisherName ),
-          type:type_id ( slug ),
-          bookTag ( tag:tagID ( tagID, tagName ) )
-        ` as any);
 
-      if (query) {
-        queryBuilder = (queryBuilder as any).ilike("title", `%${query}%`);
-      }
+          author!books_authorID_fkey ( authorID, authorName ),
+          publisher!book_publisherID_fkey ( publisherID, publisherName ),
+          book_type!fk_book_type ( id, name, slug ),
+
+          bookTag ( tag:tagID ( tagID, tagName ) )
+        ` as any
+        );
+
+      // NOTE: do not apply full-text filter server-side because we also want to
+      // match author and publisher names which are joined relations. We'll
+      // fetch the candidate rows (optionally filtered by type) and then
+      // perform a case-insensitive text match on the client across
+      // title/titleEn/description/authorName/publisher.
 
       if (selectedType && TYPE_ID_MAP[selectedType]) {
         queryBuilder = (queryBuilder as any).eq("type_id", TYPE_ID_MAP[selectedType]);
@@ -70,7 +77,9 @@ const SearchPage = () => {
         publishDate: b.publishDate ?? "",
         slug: b.slug ?? "",
         publisher: b.publisher?.publisherName ?? "-",
-        type: b.type?.slug ?? "manga",
+        authorName: b.author?.authorName ?? b.authorName ?? "-",
+        author: b.author?.authorName ?? b.authorName ?? "-",
+        type: b.book_type?.slug ?? (b.type?.slug ?? "manga"),
         tags: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
         genres: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
         isNew: b.is_new ?? false,
@@ -79,6 +88,25 @@ const SearchPage = () => {
         reviewCount: b.review_count ?? 0,
         price: b.price ?? 0,
       }));
+
+      // client-side text search to include author and publisher matches
+      if (query) {
+        const q = query.trim().toLowerCase();
+        mapped = mapped.filter((b) => {
+          const hay = [
+            b.title,
+            b.titleEn,
+            b.description,
+            b.authorName,
+            b.publisher,
+            ...(b.tags ?? []),
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return hay.includes(q);
+        });
+      }
 
       if (selectedGenres.length > 0) {
         mapped = mapped.filter((b) =>

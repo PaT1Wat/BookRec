@@ -1,13 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL!;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY!;
+const SUPABASE_URL = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+const SUPABASE_PUBLISHABLE_KEY = String(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "").trim();
 
 // 🔥 กันพัง + debug ง่าย
 if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
   throw new Error("❌ Missing Supabase environment variables");
 }
+
+// Helpful debug: show which URL the client is using (publishable key is public so we don't log it)
+console.debug("Supabase URL:", SUPABASE_URL);
 
 export const supabase = createClient<Database>(
   SUPABASE_URL,

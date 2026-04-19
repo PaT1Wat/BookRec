@@ -143,7 +143,6 @@ Backend จะรันที่ → **http://localhost:8000**
 cd ..
 
 # รัน React App
-npm run dev
 ```
 
 Frontend จะรันที่ → **http://localhost:5173**
