@@ -4,6 +4,7 @@ import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 
 // ✅ mapping ภาษาไทย → tagName ใน DB
 const GENRE_MAP: Record<string, string> = {
@@ -48,6 +49,21 @@ const Index = () => {
     const fetchRecs = async () => {
       if (!user || books.length === 0) return;
       try {
+        // check if user has meaningful interactions (favorite or review)
+        const [{ data: favs, error: favErr }, { data: revs, error: revErr }] = await Promise.all([
+          supabase.from("favorite").select("favoriteID").eq("user_id", user.id),
+          supabase.from("review").select("reviewID").eq("user_id", user.id),
+        ]);
+
+        if (favErr || revErr) {
+          // if checking fails, don't show recs
+          console.error("Error checking interactions:", favErr || revErr);
+          return;
+        }
+
+        const hasInteraction = (favs && favs.length > 0) || (revs && revs.length > 0);
+        if (!hasInteraction) return; // don't fetch recommendations for cold user
+
         const resp = await fetch(`/recommend/${user.id}`);
         if (!resp.ok) return;
         const json = await resp.json();
