@@ -100,19 +100,24 @@ const BookCard = ({ book }: BookCardProps) => {
         {/* ⭐ Rating + ราคา */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-            <span className="text-xs font-medium text-foreground">
-              {book.rating ?? 0}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              ({book.reviewCount ?? 0})
-            </span>
+            {/* Render 5 small stars filled according to rounded rating */}
+            <div className="flex items-center gap-0.5">
+              {Array.from({ length: 5 }).map((_, i) => {
+                const filled = i < Math.round(book.rating ?? 0);
+                return (
+                  <Star
+                    key={i}
+                    className={`h-3 w-3 ${filled ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
+                  />
+                );
+              })}
+            </div>
+            <span className="text-xs font-medium text-foreground">{(book.rating ?? 0).toFixed(1)}</span>
+            <span className="text-xs text-muted-foreground">({book.reviewCount ?? 0})</span>
           </div>
 
           {(book.price ?? 0) > 0 && (
-            <span className="text-sm font-bold text-primary">
-              ฿{book.price}
-            </span>
+            <span className="text-sm font-bold text-primary">฿{book.price}</span>
           )}
         </div>
 

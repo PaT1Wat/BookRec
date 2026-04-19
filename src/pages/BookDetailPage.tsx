@@ -23,7 +23,7 @@ type Review = {
 
 const BookDetailPage = () => {
   const { id } = useParams();
-  const { books = [], refetch: refetchBooks } = useBooks();
+  const { books = [], refetch: refetchBooks, patchBook } = useBooks();
   const { toggle, check } = useFavorites();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -39,8 +39,9 @@ const BookDetailPage = () => {
   /* =======================
      📥 Fetch Reviews
   ======================= */
-  const fetchReviews = async (bookID: number) => {
+  const fetchReviews = async (bookID: number): Promise<Review[]> => {
     setReviewLoading(true);
+    let reviewsWithProfile: Review[] = [];
 
     const { data } = await supabase
       .from("review" as any)
@@ -49,7 +50,7 @@ const BookDetailPage = () => {
       .order("createdAt", { ascending: false }) as any;
 
     if (data) {
-      const reviewsWithProfile = await Promise.all(
+      reviewsWithProfile = await Promise.all(
         (data as Review[]).map(async (r) => {
           const { data: p } = await supabase
             .from("profiles" as any)
@@ -74,9 +75,17 @@ const BookDetailPage = () => {
           setComment("");
         }
       }
+    } else {
+      setReviews([]);
+      if (user) {
+        setMyReview(null);
+        setMyRating(0);
+        setComment("");
+      }
     }
 
     setReviewLoading(false);
+    return reviewsWithProfile;
   };
 
   useEffect(() => {
@@ -97,7 +106,27 @@ const BookDetailPage = () => {
     }
 
     setSubmitting(true);
+    // optimistic update: update UI first, then persist
+    const book = books.find((b) => b.id === id);
+    const snapshot = book ? { rating: book.rating ?? 0, reviewCount: book.reviewCount ?? 0 } : null;
     try {
+      if (book) {
+        if (myReview) {
+          // editing existing: count stays same
+          const oldRating = myReview.rating ?? 0;
+          const count = book.reviewCount ?? 0;
+          const newAvg = count > 0 ? ((book.rating ?? 0) * count - oldRating + myRating) / count : myRating;
+          patchBook(String(id), { rating: Number(newAvg.toFixed(1)), reviewCount: count });
+        } else {
+          // new review: increment count
+          const oldRating = book.rating ?? 0;
+          const oldCount = book.reviewCount ?? 0;
+          const newCount = oldCount + 1;
+          const newAvg = newCount > 0 ? ((oldRating * oldCount) + myRating) / newCount : myRating;
+          patchBook(String(id), { rating: Number(newAvg.toFixed(1)), reviewCount: newCount });
+        }
+      }
+
       if (myReview) {
         const { error } = await supabase
           .from("review" as any)
@@ -118,14 +147,27 @@ const BookDetailPage = () => {
         if (error) throw error;
         toast({ title: "รีวิวสำเร็จ ✅" });
       }
-      await fetchReviews(Number(id));
-      // Refresh global book list so rating/review_count are updated in UI
+
+      // refresh canonical data
+      try {
+        const reviewsAfter = await fetchReviews(Number(id));
+        const avg = reviewsAfter.length
+          ? reviewsAfter.reduce((s, r) => s + (r.rating ?? 0), 0) / reviewsAfter.length
+          : 0;
+        if (id) patchBook(String(id), { rating: Number(avg.toFixed(1)), reviewCount: reviewsAfter.length });
+      } catch (e) {
+        console.debug("Unable to refresh reviews after submit", e);
+      }
       try {
         await refetchBooks();
       } catch (e) {
-        console.warn("Failed to refetch books after review submit", e);
+        console.debug("Failed to refetch books after submit", e);
       }
     } catch (err: any) {
+      // rollback optimistic
+      if (snapshot && id) {
+        patchBook(String(id), { rating: snapshot.rating, reviewCount: snapshot.reviewCount });
+      }
       toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
     } finally {
       setSubmitting(false);
@@ -137,20 +179,34 @@ const BookDetailPage = () => {
   ======================= */
   const handleDelete = async () => {
     if (!myReview) return;
+    // optimistic delete: patch UI then delete
+    const book = books.find((b) => b.id === id);
+    const snapshot = book ? { rating: book.rating ?? 0, reviewCount: book.reviewCount ?? 0 } : null;
     try {
+      if (book) {
+        const oldRating = myReview.rating ?? 0;
+        const oldCount = book.reviewCount ?? 0;
+        const newCount = Math.max(0, oldCount - 1);
+        const newAvg = newCount > 0 ? (((book.rating ?? 0) * oldCount - oldRating) / newCount) : 0;
+        patchBook(String(id), { rating: Number(newAvg.toFixed(1)), reviewCount: newCount });
+      }
+
       await supabase.from("review" as any).delete().eq("reviewID", myReview.reviewID);
       setMyReview(null);
       setMyRating(0);
       setComment("");
       toast({ title: "ลบรีวิวสำเร็จ 🗑️" });
-      await fetchReviews(Number(id));
-      // Refresh global book list after deleting a review
+
       try {
         await refetchBooks();
       } catch (e) {
-        console.warn("Failed to refetch books after review delete", e);
+        console.debug("Failed to refetch books after delete", e);
       }
     } catch (err: any) {
+      // rollback
+      if (snapshot && id) {
+        patchBook(String(id), { rating: snapshot.rating, reviewCount: snapshot.reviewCount });
+      }
       toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
     }
   };

@@ -35,6 +35,7 @@ interface BooksContextType {
   addBook: (book: FormData) => Promise<void>;
   updateBook: (id: string, book: FormData) => Promise<void>;
   deleteBook: (id: string) => Promise<void>;
+  patchBook: (id: string, patch: Partial<{ rating: number; reviewCount: number }>) => void;
   refetch: () => Promise<void>;
 }
 
@@ -235,8 +236,53 @@ export function BooksProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  const patchBook = useCallback((id: string, patch: Partial<{ rating: number; reviewCount: number }>) => {
+    console.debug("patchBook called", { id, patch });
+    setBooks((prev) => {
+      const next = prev.map((b) => (b.id === String(id) ? { ...b, ...patch } : b));
+      console.debug("books after patch (sample)", next.find((b) => b.id === String(id)));
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     fetchBooks();
+  }, [fetchBooks]);
+
+  // Realtime: listen for review or book changes and refetch so UI stays in sync
+  useEffect(() => {
+    try {
+      const channel = supabase
+        .channel("realtime:books_reviews")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "review" },
+          () => {
+            console.debug("Realtime: review changed, refetching books");
+            fetchBooks();
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "books" },
+          () => {
+            console.debug("Realtime: books changed, refetching books");
+            fetchBooks();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        try {
+          supabase.removeChannel(channel);
+        } catch (e) {
+          console.debug("Failed to remove realtime channel", e);
+        }
+      };
+    } catch (e) {
+      console.debug("Realtime not available", e);
+      return;
+    }
   }, [fetchBooks]);
 
   /* =======================
@@ -349,7 +395,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
 
   return (
     <BooksContext.Provider
-      value={{ books, loading, rawPayload, lastError, addBook, updateBook, deleteBook, refetch: fetchBooks }}
+      value={{ books, loading, rawPayload, lastError, addBook, updateBook, deleteBook, patchBook, refetch: fetchBooks }}
     >
       {children}
     </BooksContext.Provider>
