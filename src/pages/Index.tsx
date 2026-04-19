@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useBooks } from "@/context/BooksContext";
 import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 
 // ✅ mapping ภาษาไทย → tagName ใน DB
 const GENRE_MAP: Record<string, string> = {
@@ -38,6 +39,31 @@ const Index = () => {
   const mangaBooks      = filterByGenre(books.filter((b) => b.type === "manga")).slice(0, 6);
   const novelBooks      = filterByGenre(books.filter((b) => b.type === "novel")).slice(0, 6);
   const lightNovelBooks = filterByGenre(books.filter((b) => b.type === "light-novel")).slice(0, 6);
+  const { user } = useAuth();
+
+  // Recommended books from backend (by user). We'll fetch ids then map to local book objects.
+  const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const fetchRecs = async () => {
+      if (!user || books.length === 0) return;
+      try {
+        const resp = await fetch(`/recommend/${user.id}`);
+        if (!resp.ok) return;
+        const json = await resp.json();
+        setRecommendedIds((json.bookIDs || []).map((id: any) => String(id)));
+      } catch (err) {
+        console.error("Failed to fetch recommendations:", err);
+      }
+    };
+
+    fetchRecs();
+  }, [user?.id, books.length]);
+
+  const recommendedBooks = recommendedIds
+    .map((id) => books.find((b) => String(b.id) === id))
+    .filter(Boolean)
+    .slice(0, 6) as typeof books;
 
   return (
     <div className="min-h-screen">
@@ -79,6 +105,14 @@ const Index = () => {
             </button>
           ))}
         </div>
+
+        {!selectedGenre && recommendedBooks.length > 0 && (
+          <BookSection
+            title="💡 สำหรับคุณ"
+            subtitle="หนังสือที่ระบบแนะนำตามความชอบของคุณ"
+            books={recommendedBooks}
+          />
+        )}
 
         {!selectedGenre && popularBooks.length > 0 && (
           <BookSection
