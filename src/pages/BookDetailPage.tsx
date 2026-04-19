@@ -23,7 +23,7 @@ type Review = {
 
 const BookDetailPage = () => {
   const { id } = useParams();
-  const { books = [] } = useBooks();
+  const { books = [], refetch: refetchBooks } = useBooks();
   const { toggle, check } = useFavorites();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -119,6 +119,12 @@ const BookDetailPage = () => {
         toast({ title: "รีวิวสำเร็จ ✅" });
       }
       await fetchReviews(Number(id));
+      // Refresh global book list so rating/review_count are updated in UI
+      try {
+        await refetchBooks();
+      } catch (e) {
+        console.warn("Failed to refetch books after review submit", e);
+      }
     } catch (err: any) {
       toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
     } finally {
@@ -138,6 +144,12 @@ const BookDetailPage = () => {
       setComment("");
       toast({ title: "ลบรีวิวสำเร็จ 🗑️" });
       await fetchReviews(Number(id));
+      // Refresh global book list after deleting a review
+      try {
+        await refetchBooks();
+      } catch (e) {
+        console.warn("Failed to refetch books after review delete", e);
+      }
     } catch (err: any) {
       toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
     }
