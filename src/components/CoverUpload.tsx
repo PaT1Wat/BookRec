@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Upload, X, ImageIcon } from "lucide-react";
+import { Upload, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,18 +14,44 @@ const CoverUpload = ({ value, onChange }: CoverUploadProps) => {
   const [useUrl, setUseUrl] = useState(!value || value.startsWith("http"));
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /* =======================
+     📤 Upload
+  ======================= */
   const handleUpload = async (file: File) => {
-    if (!file.type.startsWith("image/")) return;
+    if (!file.type.startsWith("image/")) {
+      alert("กรุณาเลือกไฟล์รูปภาพ");
+      return;
+    }
+
+    // 🔥 จำกัดขนาด (2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      alert("ไฟล์ต้องไม่เกิน 2MB");
+      return;
+    }
+
     setUploading(true);
+
     try {
       const ext = file.name.split(".").pop();
-      const path = `${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage.from("book-covers").upload(path, file, { upsert: true });
-      if (error) throw error;
-      const { data } = supabase.storage.from("book-covers").getPublicUrl(path);
+      const fileName = `${crypto.randomUUID()}.${ext}`;
+      const filePath = `covers/${fileName}`;
+
+      /* 🔥 upload */
+      const { error: uploadError } = await supabase.storage
+        .from("book-covers")
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      /* 🔥 get public url */
+      const { data } = supabase.storage
+        .from("book-covers")
+        .getPublicUrl(filePath);
+
       onChange(data.publicUrl);
     } catch (err) {
       console.error("Upload failed:", err);
+      alert("อัปโหลดไม่สำเร็จ");
     } finally {
       setUploading(false);
     }
@@ -33,8 +59,12 @@ const CoverUpload = ({ value, onChange }: CoverUploadProps) => {
 
   return (
     <div className="space-y-2">
+      {/* LABEL */}
       <div className="flex items-center gap-2">
-        <label className="text-xs font-medium text-muted-foreground">รูปปก</label>
+        <label className="text-xs font-medium text-muted-foreground">
+          รูปปก
+        </label>
+
         <button
           type="button"
           onClick={() => setUseUrl(!useUrl)}
@@ -44,6 +74,7 @@ const CoverUpload = ({ value, onChange }: CoverUploadProps) => {
         </button>
       </div>
 
+      {/* URL MODE */}
       {useUrl ? (
         <Input
           value={value}
@@ -51,20 +82,23 @@ const CoverUpload = ({ value, onChange }: CoverUploadProps) => {
           placeholder="https://example.com/cover.jpg"
         />
       ) : (
+        /* UPLOAD MODE */
         <div
           onClick={() => fileRef.current?.click()}
-          className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted/50"
+          className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground transition hover:border-primary/40 hover:bg-muted/50"
         >
           <input
             ref={fileRef}
             type="file"
             accept="image/*"
             className="hidden"
+            aria-label="อัปโหลดรูปปกหนังสือ"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) handleUpload(file);
             }}
           />
+
           {uploading ? (
             <span className="animate-pulse">กำลังอัปโหลด...</span>
           ) : (
@@ -76,9 +110,18 @@ const CoverUpload = ({ value, onChange }: CoverUploadProps) => {
         </div>
       )}
 
+      {/* PREVIEW */}
       {value && (
         <div className="relative inline-block">
-          <img src={value} alt="ปกหนังสือ" className="h-32 w-auto rounded-lg object-cover" />
+          <img
+            src={value}
+            alt="cover preview"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = "/placeholder.svg";
+            }}
+            className="h-32 w-auto rounded-lg object-cover"
+          />
+
           <Button
             type="button"
             variant="destructive"

@@ -10,203 +10,468 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4"
+    PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
-      books: {
+      author: {
         Row: {
-          author: string
-          cover_url: string
-          created_at: string
-          description: string
-          genres: string[]
-          id: string
-          is_new: boolean
-          is_popular: boolean
-          price: number
-          publisher: string
-          rating: number
-          review_count: number
-          tags: string[]
-          title: string
-          title_en: string | null
-          type: string
-          updated_at: string
+          authorID: number
+          authorName: string
+          bio: string | null
         }
         Insert: {
-          author: string
-          cover_url?: string
-          created_at?: string
-          description?: string
-          genres?: string[]
-          id?: string
-          is_new?: boolean
-          is_popular?: boolean
-          price?: number
-          publisher?: string
-          rating?: number
-          review_count?: number
-          tags?: string[]
-          title: string
-          title_en?: string | null
-          type?: string
-          updated_at?: string
+          authorID?: number
+          authorName: string
+          bio?: string | null
         }
         Update: {
-          author?: string
-          cover_url?: string
-          created_at?: string
-          description?: string
-          genres?: string[]
-          id?: string
-          is_new?: boolean
-          is_popular?: boolean
-          price?: number
-          publisher?: string
-          rating?: number
-          review_count?: number
-          tags?: string[]
-          title?: string
-          title_en?: string | null
-          type?: string
-          updated_at?: string
+          authorID?: number
+          authorName?: string
+          bio?: string | null
         }
         Relationships: []
+      }
+      book_type: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          id: number
+          name: string
+          slug: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          id?: number
+          name: string
+          slug: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          id?: number
+          name?: string
+          slug?: string
+        }
+        Relationships: []
+      }
+      books: {
+        Row: {
+          authorID: number | null
+          bookID: number
+          coverImage: string | null
+          createdAt: string | null
+          description: string | null
+          is_new: boolean | null
+          is_popular: boolean | null
+          price: number | null
+          publishDate: string | null
+          publisherID: number | null
+          rating: number | null
+          review_count: number | null
+          slug: string | null
+          title: string
+          titleEn: string | null
+          type_id: number | null
+        }
+        Insert: {
+          authorID?: number | null
+          bookID?: number
+          coverImage?: string | null
+          createdAt?: string | null
+          description?: string | null
+          is_new?: boolean | null
+          is_popular?: boolean | null
+          price?: number | null
+          publishDate?: string | null
+          publisherID?: number | null
+          rating?: number | null
+          review_count?: number | null
+          slug?: string | null
+          title: string
+          titleEn?: string | null
+          type_id?: number | null
+        }
+        Update: {
+          authorID?: number | null
+          bookID?: number
+          coverImage?: string | null
+          createdAt?: string | null
+          description?: string | null
+          is_new?: boolean | null
+          is_popular?: boolean | null
+          price?: number | null
+          publishDate?: string | null
+          publisherID?: number | null
+          rating?: number | null
+          review_count?: number | null
+          slug?: string | null
+          title?: string
+          titleEn?: string | null
+          type_id?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "book_publisherID_fkey"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+          {
+            foreignKeyName: "books_authorID_fkey"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_book_type"
+            columns: ["type_id"]
+            isOneToOne: false
+            referencedRelation: "book_type"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_books_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_books_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+          {
+            foreignKeyName: "fk_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+        ]
+      }
+      bookTag: {
+        Row: {
+          bookID: number | null
+          id: number
+          tagID: number | null
+        }
+        Insert: {
+          bookID?: number | null
+          id?: number
+          tagID?: number | null
+        }
+        Update: {
+          bookID?: number | null
+          id?: number
+          tagID?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bookTag_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "bookTag_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "bookTag_tagID_fkey"
+            columns: ["tagID"]
+            isOneToOne: false
+            referencedRelation: "tag"
+            referencedColumns: ["tagID"]
+          },
+        ]
+      }
+      favorite: {
+        Row: {
+          bookID: number | null
+          createdAt: string | null
+          favoriteID: number
+          user_id: string | null
+        }
+        Insert: {
+          bookID?: number | null
+          createdAt?: string | null
+          favoriteID?: number
+          user_id?: string | null
+        }
+        Update: {
+          bookID?: number | null
+          createdAt?: string | null
+          favoriteID?: number
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "favorite_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "favorite_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
+            referencedColumns: ["bookID"]
+          },
+        ]
+      }
+      interaction: {
+        Row: {
+          actionType: string | null
+          bookID: number | null
+          createdAt: string | null
+          interactionID: number
+          user_id: string | null
+        }
+        Insert: {
+          actionType?: string | null
+          bookID?: number | null
+          createdAt?: string | null
+          interactionID?: number
+          user_id?: string | null
+        }
+        Update: {
+          actionType?: string | null
+          bookID?: number | null
+          createdAt?: string | null
+          interactionID?: number
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interaction_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "interaction_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
+            referencedColumns: ["bookID"]
+          },
+        ]
       }
       profiles: {
         Row: {
           avatar_url: string | null
           created_at: string
           display_name: string | null
-          id: string
-          updated_at: string
-          user_id: string
+          userID: string
         }
         Insert: {
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null
-          id?: string
-          updated_at?: string
-          user_id: string
+          userID?: string
         }
         Update: {
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null
-          id?: string
-          updated_at?: string
-          user_id?: string
+          userID?: string
         }
         Relationships: []
       }
-      recommendations: {
+      publisher: {
         Row: {
-          book_id: string
-          created_at: string
-          id: string
-          rec_type: string
-          score: number
+          publisherID: number
+          publisherName: string
+          website: string | null
+        }
+        Insert: {
+          publisherID?: number
+          publisherName: string
+          website?: string | null
+        }
+        Update: {
+          publisherID?: number
+          publisherName?: string
+          website?: string | null
+        }
+        Relationships: []
+      }
+      review: {
+        Row: {
+          bookID: number
+          comment: string | null
+          createdAt: string | null
+          rating: number | null
+          reviewID: number
           user_id: string | null
         }
         Insert: {
-          book_id: string
-          created_at?: string
-          id?: string
-          rec_type?: string
-          score?: number
+          bookID: number
+          comment?: string | null
+          createdAt?: string | null
+          rating?: number | null
+          reviewID?: number
           user_id?: string | null
         }
         Update: {
-          book_id?: string
-          created_at?: string
-          id?: string
-          rec_type?: string
-          score?: number
+          bookID?: number
+          comment?: string | null
+          createdAt?: string | null
+          rating?: number | null
+          reviewID?: number
           user_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "recommendations_book_id_fkey"
-            columns: ["book_id"]
+            foreignKeyName: "review_bookID_fkey"
+            columns: ["bookID"]
             isOneToOne: false
             referencedRelation: "books"
-            referencedColumns: ["id"]
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "review_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
+            referencedColumns: ["bookID"]
           },
         ]
       }
-      reviews: {
+      tag: {
         Row: {
-          book_id: string
-          comment: string
+          tagID: number
+          tagName: string
+          tagType: string | null
+        }
+        Insert: {
+          tagID?: number
+          tagName: string
+          tagType?: string | null
+        }
+        Update: {
+          tagID?: number
+          tagName?: string
+          tagType?: string | null
+        }
+        Relationships: []
+      }
+      user: {
+        Row: {
           created_at: string
+          display_name: string | null
+          email: string
           id: string
-          rating: number
+          role: string
           updated_at: string
-          user_id: string
+          userName: string
         }
         Insert: {
-          book_id: string
-          comment?: string
-          created_at?: string
-          id?: string
-          rating: number
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          book_id?: string
-          comment?: string
-          created_at?: string
-          id?: string
-          rating?: number
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "reviews_book_id_fkey"
-            columns: ["book_id"]
-            isOneToOne: false
-            referencedRelation: "books"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      user_roles: {
-        Row: {
+          created_at: string
+          display_name?: string | null
+          email: string
           id: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
-        }
-        Insert: {
-          id?: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
+          role: string
+          updated_at: string
+          userName: string
         }
         Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
-          user_id?: string
+          role?: string
+          updated_at?: string
+          userName?: string
         }
         Relationships: []
       }
     }
     Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
+      books_with_details: {
+        Row: {
+          authorID: number | null
+          authorName: string | null
+          bookID: number | null
+          coverImage: string | null
+          description: string | null
+          publishDate: string | null
+          publisherID: number | null
+          publisherName: string | null
+          title: string | null
         }
-        Returns: boolean
+        Relationships: [
+          {
+            foreignKeyName: "book_publisherID_fkey"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+          {
+            foreignKeyName: "books_authorID_fkey"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_books_author"
+            columns: ["authorID"]
+            isOneToOne: false
+            referencedRelation: "author"
+            referencedColumns: ["authorID"]
+          },
+          {
+            foreignKeyName: "fk_books_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+          {
+            foreignKeyName: "fk_publisher"
+            columns: ["publisherID"]
+            isOneToOne: false
+            referencedRelation: "publisher"
+            referencedColumns: ["publisherID"]
+          },
+        ]
       }
     }
+    Functions: {
+      [_ in never]: never
+    }
     Enums: {
-      app_role: "admin" | "moderator" | "user"
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never
@@ -333,8 +598,6 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {
-      app_role: ["admin", "moderator", "user"],
-    },
+    Enums: {},
   },
 } as const

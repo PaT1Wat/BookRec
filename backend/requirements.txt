@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+lightfm
+numpy
+pandas
+supabase
+python-dotenv
+openai

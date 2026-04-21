@@ -1,33 +1,129 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Search, Filter, X } from "lucide-react";
-import { genres, type BookType, type Genre } from "@/data/books";
-import { useBooks } from "@/context/BooksContext";
+import { Search, Filter } from "lucide-react";
+import { type BookType } from "@/data/books";
+import { supabase } from "@/integrations/supabase/client";
 import BookCard from "@/components/BookCard";
 
+// ✅ ตรงกับ tagName ใน DB แล้ว
+const GENRE_LIST = [
+  "แอ็กชัน", "ผจญภัย", "แฟนตาซี", "โรแมนติก", "ดราม่า",
+  "คอมเมดี้", "สยองขวัญ", "สืบสวน", "ไซไฟ", "ชีวิตประจำวัน", "GL/BL",
+];
+
+const TYPE_ID_MAP: Record<string, number> = {
+  manga: 1,
+  novel: 2,
+  "light-novel": 3,
+};
+
 const SearchPage = () => {
-  const { searchBooks } = useBooks();
   const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") || "";
   const initialGenre = searchParams.get("genre") || "";
 
   const [query, setQuery] = useState(initialQuery);
   const [selectedType, setSelectedType] = useState<BookType | "">("");
-  const [selectedGenres, setSelectedGenres] = useState<Genre[]>(
-    initialGenre ? [initialGenre as Genre] : []
+  const [selectedGenres, setSelectedGenres] = useState<string[]>(
+    initialGenre ? [initialGenre] : []
   );
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(!!initialGenre);
+  const [books, setBooks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const results = useMemo(() => {
-    return searchBooks(query, {
-      type: selectedType || undefined,
-      genres: selectedGenres.length > 0 ? selectedGenres : undefined,
-    });
-  }, [query, selectedType, selectedGenres, searchBooks]);
+  useEffect(() => {
+    const delay = setTimeout(async () => {
+      setLoading(true);
 
-  const toggleGenre = (g: Genre) => {
-    setSelectedGenres(prev =>
-      prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]
+      let queryBuilder = supabase
+        .from("books")
+        .select(
+          `
+          bookID, title, titleEn, description, coverImage,
+          publishDate, slug, is_new, is_popular, rating, review_count, price,
+
+          author!books_authorID_fkey ( authorID, authorName ),
+          publisher!book_publisherID_fkey ( publisherID, publisherName ),
+          book_type!fk_book_type ( id, name, slug ),
+
+          bookTag ( tag:tagID ( tagID, tagName ) )
+        ` as any
+        );
+
+      // NOTE: do not apply full-text filter server-side because we also want to
+      // match author and publisher names which are joined relations. We'll
+      // fetch the candidate rows (optionally filtered by type) and then
+      // perform a case-insensitive text match on the client across
+      // title/titleEn/description/authorName/publisher.
+
+      if (selectedType && TYPE_ID_MAP[selectedType]) {
+        queryBuilder = (queryBuilder as any).eq("type_id", TYPE_ID_MAP[selectedType]);
+      }
+
+      const { data, error } = await queryBuilder;
+
+      if (error) {
+        console.error("Supabase error:", error);
+        setLoading(false);
+        return;
+      }
+
+      let mapped = (data || []).map((b: any) => ({
+        id: String(b.bookID),
+        title: b.title ?? "",
+        titleEn: b.titleEn ?? "",
+        description: b.description ?? "",
+        coverUrl: b.coverImage ?? "",
+        publishDate: b.publishDate ?? "",
+        slug: b.slug ?? "",
+        publisher: b.publisher?.publisherName ?? "-",
+        authorName: b.author?.authorName ?? b.authorName ?? "-",
+        author: b.author?.authorName ?? b.authorName ?? "-",
+        type: b.book_type?.slug ?? (b.type?.slug ?? "manga"),
+        tags: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
+        genres: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
+        isNew: b.is_new ?? false,
+        isPopular: b.is_popular ?? false,
+        rating: b.rating ?? 0,
+        reviewCount: b.review_count ?? 0,
+        price: b.price ?? 0,
+      }));
+
+      // client-side text search to include author and publisher matches
+      if (query) {
+        const q = query.trim().toLowerCase();
+        mapped = mapped.filter((b) => {
+          const hay = [
+            b.title,
+            b.titleEn,
+            b.description,
+            b.authorName,
+            b.publisher,
+            ...(b.tags ?? []),
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return hay.includes(q);
+        });
+      }
+
+      if (selectedGenres.length > 0) {
+        mapped = mapped.filter((b) =>
+          selectedGenres.some((g) => b.genres.includes(g))
+        );
+      }
+
+      setBooks(mapped);
+      setLoading(false);
+    }, 300);
+
+    return () => clearTimeout(delay);
+  }, [query, selectedType, selectedGenres]);
+
+  const toggleGenre = (g: string) => {
+    setSelectedGenres((prev) =>
+      prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]
     );
   };
 
@@ -39,51 +135,59 @@ const SearchPage = () => {
 
   return (
     <div className="container py-8">
-      <h1 className="mb-6 text-3xl font-bold font-display text-foreground">ค้นหาหนังสือ</h1>
+      <h1 className="mb-6 text-3xl font-bold font-display">ค้นหาหนังสือ</h1>
 
+      {/* 🔍 Search */}
       <div className="mb-6 flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="ค้นหาชื่อเรื่อง, ผู้แต่ง, แท็ก..."
-            className="w-full rounded-xl border border-input bg-card py-3 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+            placeholder="ค้นหาชื่อหนังสือ..."
+            className="w-full rounded-xl border bg-card py-3 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
         <button
           onClick={() => setShowFilters(!showFilters)}
           className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
-            showFilters ? "border-primary bg-primary/10 text-primary" : "border-input bg-card text-foreground hover:bg-secondary"
+            showFilters || selectedGenres.length > 0 || selectedType
+              ? "border-primary bg-primary/10 text-primary"
+              : "bg-card"
           }`}
         >
           <Filter className="h-4 w-4" />
-          ตัวกรอง
+          ตัวกรอง {selectedGenres.length > 0 && `(${selectedGenres.length})`}
         </button>
       </div>
 
+      {/* 🎛 Filter Panel */}
       {showFilters && (
-        <div className="mb-6 rounded-xl border border-border bg-card p-4 space-y-4 animate-fade-in-up">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-foreground">ตัวกรอง</h3>
-            <button onClick={clearFilters} className="text-xs text-primary hover:underline">ล้างทั้งหมด</button>
+        <div className="mb-6 rounded-xl border bg-card p-4 space-y-4">
+          <div className="flex justify-between">
+            <h3 className="text-sm font-semibold">ตัวกรอง</h3>
+            <button onClick={clearFilters} className="text-xs text-primary hover:underline">
+              ล้างทั้งหมด
+            </button>
           </div>
 
+          {/* TYPE */}
           <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">ประเภท</p>
+            <p className="mb-2 text-xs text-muted-foreground">ประเภท</p>
             <div className="flex gap-2">
               {[
                 { value: "", label: "ทั้งหมด" },
                 { value: "manga", label: "มังงะ" },
                 { value: "novel", label: "นิยาย" },
-              ].map(t => (
+                { value: "light-novel", label: "ไลท์โนเวล" },
+              ].map((t) => (
                 <button
                   key={t.value}
                   onClick={() => setSelectedType(t.value as BookType | "")}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                     selectedType === t.value
-                      ? "gradient-primary text-primary-foreground"
-                      : "bg-secondary text-secondary-foreground hover:bg-primary/10"
+                      ? "bg-primary text-white"
+                      : "bg-secondary hover:bg-secondary/80"
                   }`}
                 >
                   {t.label}
@@ -92,17 +196,18 @@ const SearchPage = () => {
             </div>
           </div>
 
+          {/* GENRE */}
           <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">แนว</p>
+            <p className="mb-2 text-xs text-muted-foreground">แนว</p>
             <div className="flex flex-wrap gap-2">
-              {genres.map(g => (
+              {GENRE_LIST.map((g) => (
                 <button
                   key={g}
                   onClick={() => toggleGenre(g)}
                   className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                     selectedGenres.includes(g)
-                      ? "gradient-primary text-primary-foreground"
-                      : "bg-tag-bg text-tag-fg hover:bg-primary/10"
+                      ? "bg-primary text-white"
+                      : "bg-secondary hover:bg-secondary/80"
                   }`}
                 >
                   {g}
@@ -113,41 +218,41 @@ const SearchPage = () => {
         </div>
       )}
 
-      {(selectedGenres.length > 0 || selectedType) && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">กำลังกรอง:</span>
-          {selectedType && (
-            <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
-              {selectedType === "manga" ? "มังงะ" : "นิยาย"}
-              <X className="h-3 w-3 cursor-pointer" onClick={() => setSelectedType("")} />
-            </span>
-          )}
-          {selectedGenres.map(g => (
-            <span key={g} className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
-              {g}
-              <X className="h-3 w-3 cursor-pointer" onClick={() => toggleGenre(g)} />
-            </span>
-          ))}
-        </div>
+      {/* ⏳ Loading */}
+      {loading && (
+        <p className="text-sm text-muted-foreground animate-pulse">กำลังโหลด...</p>
       )}
 
-      <p className="mb-4 text-sm text-muted-foreground">
-        พบ {results.length} รายการ
-      </p>
+      {/* 📚 Results */}
+      {!loading && (
+        <>
+          <p className="mb-4 text-sm text-muted-foreground">
+            พบ {books.length} รายการ
+            {selectedGenres.length > 0 && (
+              <span className="ml-2 text-primary">
+                แนว: {selectedGenres.join(", ")}
+              </span>
+            )}
+          </p>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-        {results.map((book, i) => (
-          <div key={book.id} style={{ animationDelay: `${i * 60}ms` }}>
-            <BookCard book={book} />
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {books.map((book) => (
+              <BookCard key={book.id} book={book} />
+            ))}
           </div>
-        ))}
-      </div>
 
-      {results.length === 0 && (
-        <div className="py-20 text-center">
-          <p className="text-lg text-muted-foreground">ไม่พบหนังสือที่ตรงกับการค้นหา 😔</p>
-          <p className="mt-2 text-sm text-muted-foreground">ลองเปลี่ยนคำค้นหาหรือตัวกรองดูนะครับ</p>
-        </div>
+          {books.length === 0 && (
+            <div className="py-20 text-center">
+              <p className="text-lg text-muted-foreground">ไม่พบหนังสือ 😔</p>
+              <button
+                onClick={clearFilters}
+                className="mt-4 text-sm text-primary hover:underline"
+              >
+                ล้างตัวกรอง
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

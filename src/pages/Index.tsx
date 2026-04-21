@@ -1,40 +1,204 @@
+import { useState, useEffect } from "react";
 import { useBooks } from "@/context/BooksContext";
 import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
-import RecommendationSection from "@/components/RecommendationSection";
-import { genres } from "@/data/books";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+
+// ✅ mapping ภาษาไทย → tagName ใน DB
+const GENRE_MAP: Record<string, string> = {
+  "แฟนตาซี":        "แฟนตาซี",
+  "โรแมนติก":       "โรแมนติก",
+  "แอ็กชัน":        "แอ็กชัน",
+  "คอมเมดี้":       "คอมเมดี้",
+  "ดราม่า":         "ดราม่า",
+  "สืบสวน":         "สืบสวน",
+  "สยองขวัญ":       "สยองขวัญ",
+  "ชีวิตประจำวัน":  "ชีวิตประจำวัน",
+  "ผจญภัย":         "ผจญภัย",
+  "เหนือธรรมชาติ":  "ไซไฟ",
+  "GL/BL":          "GL/BL",
+};
+
+const GENRE_LABELS = Object.keys(GENRE_MAP);
 
 const Index = () => {
-  const { books } = useBooks();
-  const popularBooks = books.filter(b => b.isPopular);
-  const newBooks = books.filter(b => b.isNew);
-  const mangaBooks = books.filter(b => b.type === "manga").slice(0, 6);
-  const novelBooks = books.filter(b => b.type === "novel").slice(0, 6);
+  const { books = [], loading, rawPayload, lastError } = useBooks();
+  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+
+  // ✅ filter ด้วย tagName จาก DB
+  const dbGenre = selectedGenre ? GENRE_MAP[selectedGenre] : null;
+
+  const filterByGenre = (list: typeof books) =>
+    dbGenre
+      ? list.filter((b) => (b.genres ?? []).includes(dbGenre))
+      : list;
+
+  const popularBooks    = filterByGenre(books.filter((b) => b.isPopular));
+  const newBooks        = filterByGenre(books.filter((b) => b.isNew));
+  const mangaBooks      = filterByGenre(books.filter((b) => b.type === "manga")).slice(0, 6);
+  const novelBooks      = filterByGenre(books.filter((b) => b.type === "novel")).slice(0, 6);
+  const lightNovelBooks = filterByGenre(books.filter((b) => b.type === "light-novel")).slice(0, 6);
+  const { user } = useAuth();
+
+  // Recommended books from backend (by user). We'll fetch ids then map to local book objects.
+  const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const fetchRecs = async () => {
+      if (!user || books.length === 0) return;
+      try {
+        // check if user has meaningful interactions (favorite or review)
+        const [{ data: favs, error: favErr }, { data: revs, error: revErr }] = await Promise.all([
+          supabase.from("favorite").select("favoriteID").eq("user_id", user.id),
+          supabase.from("review").select("reviewID").eq("user_id", user.id),
+        ]);
+
+        if (favErr || revErr) {
+          // if checking fails, don't show recs
+          console.error("Error checking interactions:", favErr || revErr);
+          return;
+        }
+
+        const hasInteraction = (favs && favs.length > 0) || (revs && revs.length > 0);
+        if (!hasInteraction) return; // don't fetch recommendations for cold user
+
+        const resp = await fetch(`/recommend/${user.id}`);
+        if (!resp.ok) return;
+        const json = await resp.json();
+        setRecommendedIds((json.bookIDs || []).map((id: any) => String(id)));
+      } catch (err) {
+        console.error("Failed to fetch recommendations:", err);
+      }
+    };
+
+    fetchRecs();
+  }, [user?.id, books.length]);
+
+  const recommendedBooks = recommendedIds
+    .map((id) => books.find((b) => String(b.id) === id))
+    .filter(Boolean)
+    .slice(0, 6) as typeof books;
 
   return (
     <div className="min-h-screen">
       <HeroSection />
 
       <div className="container">
-        {/* Genre tags */}
+        {/* Debug: if books failed to load, show a visible hint */}
+        {!loading && books.length === 0 && (
+          <div className="py-12 text-center text-destructive">
+            ไม่พบหนังสือในระบบ — ตรวจสอบค่าตัวแปรสภาพแวดล้อมของ Supabase
+            และดูคอนโซลเบราเซอร์ (ค้นหาข้อความ "BOOK DATA" / "BOOK ERROR").
+          </div>
+        )}
+        {/* ✅ Genre pills — คลิกกรอง inline */}
         <div className="flex flex-wrap gap-2 py-6">
-          {genres.slice(0, 10).map(g => (
-            <Link
+          {/* ปุ่ม "ทั้งหมด" */}
+          <button
+            onClick={() => setSelectedGenre(null)}
+            className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+              !selectedGenre
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
+            }`}
+          >
+            ทั้งหมด
+          </button>
+
+          {GENRE_LABELS.map((g) => (
+            <button
               key={g}
-              to={`/search?genre=${g}`}
-              className="rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => setSelectedGenre(selectedGenre === g ? null : g)}
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                selectedGenre === g
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
+              }`}
             >
               {g}
-            </Link>
+            </button>
           ))}
         </div>
 
-        <RecommendationSection />
-        <BookSection title="🔥 ยอดนิยม" subtitle="หนังสือที่ได้รับความนิยมสูงสุด" books={popularBooks} />
-        <BookSection title="✨ มาใหม่" subtitle="หนังสือที่เพิ่งเข้ามาใหม่ในระบบ" books={newBooks} />
-        <BookSection title="📖 มังงะ" subtitle="การ์ตูนญี่ปุ่นสุดฮิต" books={mangaBooks} />
-        <BookSection title="📚 นิยาย" subtitle="นิยายหลากหลายแนว" books={novelBooks} />
+        {!selectedGenre && recommendedBooks.length > 0 && (
+          <BookSection
+            title="💡 สำหรับคุณ"
+            subtitle="หนังสือที่ระบบแนะนำตามความชอบของคุณ"
+            books={recommendedBooks}
+          />
+        )}
+
+        {!selectedGenre && popularBooks.length > 0 && (
+          <BookSection
+            title="🔥 ยอดนิยม"
+            subtitle="หนังสือที่ได้รับความนิยมสูงสุด"
+            books={popularBooks}
+          />
+        )}
+
+        {!selectedGenre && newBooks.length > 0 && (
+          <BookSection
+            title="✨ มาใหม่"
+            subtitle="หนังสือที่เพิ่งเข้ามาใหม่ในระบบ"
+            books={newBooks}
+          />
+        )}
+
+        {mangaBooks.length > 0 && (
+          <BookSection
+            title="📖 มังงะ"
+            subtitle="การ์ตูนญี่ปุ่นสุดฮิต"
+            books={mangaBooks}
+          />
+        )}
+
+        {novelBooks.length > 0 && (
+          <BookSection
+            title="📚 นิยาย"
+            subtitle="นิยายหลากหลายแนว"
+            books={novelBooks}
+          />
+        )}
+
+        {lightNovelBooks.length > 0 && (
+          <BookSection
+            title="📝 ไลท์โนเวล"
+            subtitle="นิยายภาพสไตล์ญี่ปุ่น"
+            books={lightNovelBooks}
+          />
+        )}
+
+        {/* ✅ แสดงเมื่อกรอง genre แล้วไม่พบหนังสือเลย */}
+        {selectedGenre &&
+          mangaBooks.length === 0 &&
+          novelBooks.length === 0 &&
+          lightNovelBooks.length === 0 && (
+            <div className="py-20 text-center text-muted-foreground">
+              ไม่พบหนังสือในแนว "{selectedGenre}"
+            </div>
+          )}
+
+        {/* Debug panel: show raw payload or error to help diagnose missing data */}
+        {!loading && books.length === 0 && (
+          <div className="mt-8 rounded border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+            <div className="font-semibold">Debug: ข้อมูลหนังสือไม่ถูกดึงมา</div>
+            {lastError && (
+              <div className="mt-2">
+                <div className="text-xs font-medium">BOOK ERROR:</div>
+                <pre className="mt-1 max-h-40 overflow-auto break-words text-xs">{JSON.stringify(lastError, null, 2)}</pre>
+              </div>
+            )}
+            {rawPayload && (
+              <div className="mt-2">
+                <div className="text-xs font-medium">RAW BOOK PAYLOAD:</div>
+                <pre className="mt-1 max-h-40 overflow-auto break-words text-xs">{JSON.stringify(rawPayload, null, 2)}</pre>
+              </div>
+            )}
+            <div className="mt-3 text-xs text-muted-foreground">ตรวจสอบค่าตัวแปรสภาพแวดล้อมของ Supabase และคอนโซล (ค้นหาข้อความ "Supabase URL" / "RAW BOOK PAYLOAD").</div>
+          </div>
+        )}
       </div>
     </div>
   );

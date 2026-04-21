@@ -1,200 +1,141 @@
 import { useState, useRef, useEffect } from "react";
-import { MessageCircle, X, Send, Bot, User, Sparkles } from "lucide-react";
+import { MessageCircle, X, Send, Loader2 } from "lucide-react";
 import { useBooks } from "@/context/BooksContext";
-import { type Book } from "@/data/books";
-import BookCard from "./BookCard";
 
 interface Message {
-  role: "user" | "assistant";
+  role: "user" | "bot";
   content: string;
-  books?: Book[];
 }
 
-const quickSuggestions = [
-  "แนะนำมังงะแนวแอ็คชัน",
-  "นิยายโรแมนติกต่างโลก",
-  "มังงะสำหรับมือใหม่",
-  "หนังสืออบอุ่นหัวใจ",
-];
-
-const AIChatButton = () => {
-  const { books } = useBooks();
-  const [isOpen, setIsOpen] = useState(false);
+export default function AIChatButton() {
+  const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "สวัสดีครับ! 📚 ผมเป็น AI ช่วยแนะนำหนังสือมังงะและนิยาย\n\nบอกแนวที่ชอบได้เลยครับ เช่น แอ็คชัน โรแมนติก ต่างโลก หรือจะบอกอารมณ์ที่อยากอ่านก็ได้นะครับ!",
-    },
+    { role: "bot", content: "สวัสดีครับ! ผม BookBot 📚 ถามเรื่องหนังสือได้เลยครับ" }
   ]);
   const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const { books } = useBooks();
 
+  // scroll to bottom เมื่อมีข้อความใหม่
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  function getAIResponse(userInput: string): { text: string; books: Book[] } {
-    const q = userInput.toLowerCase();
-    let filtered = [...books];
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
 
-    if (q.includes("มังงะ") || q.includes("manga")) {
-      filtered = filtered.filter(b => b.type === "manga");
-    }
-    if (q.includes("นิยาย") || q.includes("novel")) {
-      filtered = filtered.filter(b => b.type === "novel");
-    }
-
-    const genreMap: Record<string, string> = {
-      "แอ็คชัน": "แอ็คชัน", "action": "แอ็คชัน",
-      "โรแมนติก": "โรแมนติก", "romance": "โรแมนติก", "รัก": "โรแมนติก",
-      "แฟนตาซี": "แฟนตาซี", "fantasy": "แฟนตาซี",
-      "สืบสวน": "สืบสวน", "mystery": "สืบสวน",
-      "คอมเมดี้": "คอมเมดี้", "ตลก": "คอมเมดี้", "comedy": "คอมเมดี้",
-      "สยองขวัญ": "สยองขวัญ", "horror": "สยองขวัญ",
-      "ต่างโลก": "ต่างโลก", "อิเซไค": "อิเซไค", "isekai": "อิเซไค",
-      "วาย": "วาย", "bl": "วาย",
-      "ดราม่า": "ดราม่า",
-      "อบอุ่น": "โรแมนติก", "หวาน": "โรแมนติก",
-      "มือใหม่": "", "ยอดนิยม": "",
-    };
-
-    for (const [key, genre] of Object.entries(genreMap)) {
-      if (q.includes(key)) {
-        if (key === "มือใหม่" || key === "ยอดนิยม") {
-          filtered = filtered.filter(b => b.isPopular || b.rating >= 4.7);
-        } else if (genre) {
-          filtered = filtered.filter(b => b.genres.includes(genre as any) || b.tags.some(t => t.includes(key)));
-        }
-      }
-    }
-
-    if (filtered.length === books.length) {
-      filtered = [...books].sort((a, b) => b.rating - a.rating).slice(0, 4);
-    }
-
-    const selected = filtered.slice(0, 4);
-
-    let response = "";
-    if (selected.length === 0) {
-      response = "ขอโทษครับ ไม่พบหนังสือที่ตรงกับที่คุณค้นหา ลองใช้คำอื่นดูนะครับ 😊";
-    } else {
-      response = `จากที่คุณสนใจ ผมขอแนะนำ ${selected.length} เรื่องนี้ครับ:\n\n${selected.map((b, i) => `${i + 1}. **${b.title}** — ${b.description.slice(0, 60)}...`).join("\n")}\n\nลองดูรายละเอียดเพิ่มเติมได้เลยครับ! 📚`;
-    }
-
-    return { text: response, books: selected };
-  }
-
-  const sendMessage = (text: string) => {
-    if (!text.trim()) return;
-    const userMsg: Message = { role: "user", content: text };
-    setMessages(prev => [...prev, userMsg]);
+    const userMsg = input.trim();
     setInput("");
-    setIsTyping(true);
+    setMessages(prev => [...prev, { role: "user", content: userMsg }]);
+    setLoading(true);
 
-    setTimeout(() => {
-      const { text: response, books: rBooks } = getAIResponse(text);
-      setMessages(prev => [...prev, { role: "assistant", content: response, books: rBooks.length > 0 ? rBooks : undefined }]);
-      setIsTyping(false);
-    }, 800);
+    try {
+      // ส่งข้อมูลหนังสือ (แค่ชื่อ+แนว) ไปให้ bot รู้จัก
+      const booksContext = books.slice(0, 20).map(b => ({
+        title: b.title,
+        type: b.type,
+        tags: b.tags?.slice(0, 3)
+      }));
+
+      const res = await fetch("http://localhost:8000/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMsg, books: booksContext })
+      });
+
+      const data = await res.json();
+      setMessages(prev => [...prev, { role: "bot", content: data.reply }]);
+    } catch {
+      setMessages(prev => [...prev, {
+        role: "bot",
+        content: "ขออภัยครับ เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะครับ"
+      }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
   return (
     <>
+      {/* ปุ่มลอย */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-300 ${
-          isOpen ? "bg-foreground text-background rotate-0" : "gradient-primary text-primary-foreground animate-float"
-        }`}
+        onClick={() => setOpen(prev => !prev)}
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-all"
       >
-        {isOpen ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
+        {open ? <X size={24} /> : <MessageCircle size={24} />}
       </button>
 
-      {isOpen && (
-        <div className="fixed bottom-24 right-6 z-50 flex h-[520px] w-[380px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-slide-in-right">
-          <div className="flex items-center gap-3 gradient-primary px-4 py-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-foreground/20">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-primary-foreground">AI แนะนำหนังสือ</h3>
-              <p className="text-xs text-primary-foreground/70">ถามได้เลย บอกแนวที่ชอบ!</p>
-            </div>
+      {/* กล่อง Chat */}
+      {open && (
+        <div className="fixed bottom-24 right-6 z-50 w-80 sm:w-96 h-[500px] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl flex flex-col border border-gray-200 dark:border-gray-700">
+
+          {/* Header */}
+          <div className="px-4 py-3 bg-blue-600 rounded-t-2xl flex items-center gap-2">
+            <MessageCircle size={20} className="text-white" />
+            <span className="text-white font-semibold">BookBot</span>
+            <span className="text-blue-200 text-xs ml-auto">AI ผู้ช่วยแนะนำหนังสือ</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.map((msg, i) => (
-              <div key={i} className={`flex gap-2 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                  msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-accent text-accent-foreground"
-                }`}>
-                  {msg.role === "user" ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
-                </div>
-                <div className="max-w-[75%] space-y-2">
-                  <div className={`rounded-2xl px-3 py-2 text-sm ${
+              <div
+                key={i}
+                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
                     msg.role === "user"
-                      ? "bg-primary text-primary-foreground rounded-br-md"
-                      : "bg-chat-ai text-foreground rounded-bl-md"
-                  }`}>
-                    <p className="whitespace-pre-line">{msg.content}</p>
-                  </div>
-                  {msg.books && (
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {msg.books.map(b => (
-                        <a key={b.id} href={`/book/${b.id}`} className="flex-shrink-0 w-16 group">
-                          <img src={b.coverUrl} alt={b.title} className="h-24 w-16 rounded-md object-cover shadow-sm transition-transform group-hover:scale-105" />
-                          <p className="mt-1 text-[10px] line-clamp-2 text-foreground">{b.title}</p>
-                        </a>
-                      ))}
-                    </div>
-                  )}
+                      ? "bg-blue-600 text-white rounded-br-sm"
+                      : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-sm"
+                  }`}
+                >
+                  {msg.content}
                 </div>
               </div>
             ))}
-            {isTyping && (
-              <div className="flex gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                  <Bot className="h-3.5 w-3.5" />
-                </div>
-                <div className="rounded-2xl rounded-bl-md bg-chat-ai px-4 py-3">
-                  <div className="flex gap-1">
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </div>
+
+            {/* Loading dots */}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 dark:bg-gray-800 px-4 py-2 rounded-2xl rounded-bl-sm">
+                  <Loader2 size={16} className="animate-spin text-gray-500" />
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
+            <div ref={bottomRef} />
           </div>
 
-          {messages.length <= 1 && (
-            <div className="flex gap-2 overflow-x-auto px-4 pb-2 scrollbar-thin">
-              {quickSuggestions.map(s => (
-                <button key={s} onClick={() => sendMessage(s)} className="flex-shrink-0 rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/10 transition-colors">
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="border-t border-border p-3">
-            <form onSubmit={(e) => { e.preventDefault(); sendMessage(input); }} className="flex gap-2">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="พิมพ์แนวหนังสือที่ชอบ..."
-                className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <button type="submit" disabled={!input.trim()} className="flex h-9 w-9 items-center justify-center rounded-xl gradient-primary text-primary-foreground disabled:opacity-40 transition-opacity">
-                <Send className="h-4 w-4" />
-              </button>
-            </form>
+          {/* Input */}
+          <div className="p-3 border-t border-gray-200 dark:border-gray-700 flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="พิมพ์คำถามเกี่ยวกับหนังสือ..."
+              className="flex-1 text-sm px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || loading}
+              aria-label="ส่งข้อความ"
+              className="w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white flex items-center justify-center transition-all"
+            >
+              <Send size={16} />
+            </button>
           </div>
+
         </div>
       )}
     </>
   );
-};
-
-export default AIChatButton;
+}
