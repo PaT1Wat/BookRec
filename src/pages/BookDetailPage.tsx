@@ -9,9 +9,21 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 
+type Review = {
+  reviewID: number;
+  rating: number;
+  comment?: string;
+  createdAt?: string;
+  user_id: string;
+  profiles?: {
+    display_name?: string;
+    avatar_url?: string;
+  };
+};
+
 /* =======================
    ✅ Review Type
-
+======================= */
 const BookDetailPage = () => {
   const { id } = useParams();
   const { books = [], refetch: refetchBooks, patchBook } = useBooks();
