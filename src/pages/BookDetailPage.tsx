@@ -11,15 +11,6 @@ import { useState, useEffect } from "react";
 
 /* =======================
    ✅ Review Type
-======================= */
-type Review = {
-  reviewID: number;
-  rating: number;
-  comment: string;
-  createdAt: string;
-  user_id: string;
-  profiles?: { display_name: string; avatar_url: string };
-};
 
 const BookDetailPage = () => {
   const { id } = useParams();
