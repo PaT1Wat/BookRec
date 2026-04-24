@@ -4,6 +4,8 @@ import { Book } from "@/data/books";
 import { useFavorites } from "@/lib/favorites";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 
 interface BookCardProps {
   book: Book;
@@ -12,17 +14,38 @@ interface BookCardProps {
 const BookCard = ({ book }: BookCardProps) => {
   const { toggle, check } = useFavorites();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const isFav = check(book.id);
+
+  const logInteraction = async (actionType: string) => {
+    if (!user) return;
+
+    try {
+      await supabase.from("interaction" as any).insert({
+        bookID: Number(book.id),
+        user_id: user.id,
+        actionType,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.debug("Failed to log favorite interaction:", actionType, err);
+    }
+  };
 
   const handleToggle = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (loading) return;
+
     setLoading(true);
     try {
+      const wasFav = check(book.id);
+
       await toggle(book.id);
-      toast({ title: isFav ? "ลบออกแล้ว 💔" : "เพิ่มในรายการแล้ว ❤️" });
+      await logInteraction(wasFav ? "unfavorite" : "favorite");
+
+      toast({ title: wasFav ? "ลบออกแล้ว 💔" : "เพิ่มในรายการแล้ว ❤️" });
     } catch {
       toast({ title: "เกิดข้อผิดพลาด", variant: "destructive" });
     } finally {
@@ -33,7 +56,6 @@ const BookCard = ({ book }: BookCardProps) => {
   return (
     <div className="group relative animate-fade-in-up">
       <Link to={`/book/${book.id}`} className="block">
-
         {/* COVER */}
         <div className="relative overflow-hidden rounded-xl shadow-card transition-all duration-300 group-hover:shadow-card-hover group-hover:-translate-y-1">
           <div className="aspect-[2/3] overflow-hidden bg-muted">
@@ -65,9 +87,10 @@ const BookCard = ({ book }: BookCardProps) => {
         onClick={handleToggle}
         disabled={loading}
         className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full transition-all duration-200
-          ${isFav
-            ? "bg-white text-red-500"
-            : "bg-white/80 backdrop-blur text-muted-foreground hover:text-red-400"
+          ${
+            isFav
+              ? "bg-white text-red-500"
+              : "bg-white/80 backdrop-blur text-muted-foreground hover:text-red-400"
           }
           ${loading ? "opacity-50 cursor-not-allowed" : ""}
         `}
@@ -77,7 +100,6 @@ const BookCard = ({ book }: BookCardProps) => {
 
       {/* INFO */}
       <div className="mt-2 space-y-1 px-0.5">
-
         {/* ชื่อหนังสือ */}
         <Link to={`/book/${book.id}`}>
           <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary transition-colors leading-snug">
@@ -107,13 +129,21 @@ const BookCard = ({ book }: BookCardProps) => {
                 return (
                   <Star
                     key={i}
-                    className={`h-3 w-3 ${filled ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
+                    className={`h-3 w-3 ${
+                      filled
+                        ? "fill-amber-400 text-amber-400"
+                        : "text-muted-foreground/30"
+                    }`}
                   />
                 );
               })}
             </div>
-            <span className="text-xs font-medium text-foreground">{(book.rating ?? 0).toFixed(1)}</span>
-            <span className="text-xs text-muted-foreground">({book.reviewCount ?? 0})</span>
+            <span className="text-xs font-medium text-foreground">
+              {(book.rating ?? 0).toFixed(1)}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              ({book.reviewCount ?? 0})
+            </span>
           </div>
 
           {(book.price ?? 0) > 0 && (

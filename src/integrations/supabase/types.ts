@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.1"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       author: {
@@ -74,6 +99,7 @@ export type Database = {
           title: string
           titleEn: string | null
           type_id: number | null
+          updated_at: string
         }
         Insert: {
           authorID?: number | null
@@ -92,6 +118,7 @@ export type Database = {
           title: string
           titleEn?: string | null
           type_id?: number | null
+          updated_at?: string
         }
         Update: {
           authorID?: number | null
@@ -110,6 +137,7 @@ export type Database = {
           title?: string
           titleEn?: string | null
           type_id?: number | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -317,6 +345,33 @@ export type Database = {
         }
         Relationships: []
       }
+      recommendations: {
+        Row: {
+          bookID: number
+          created_at: string | null
+          id: string
+          rec_type: string | null
+          score: number
+          user_id: string | null
+        }
+        Insert: {
+          bookID: number
+          created_at?: string | null
+          id?: string
+          rec_type?: string | null
+          score: number
+          user_id?: string | null
+        }
+        Update: {
+          bookID?: number
+          created_at?: string | null
+          id?: string
+          rec_type?: string | null
+          score?: number
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       review: {
         Row: {
           bookID: number
@@ -407,6 +462,64 @@ export type Database = {
         }
         Relationships: []
       }
+      user_genres: {
+        Row: {
+          created_at: string | null
+          id: number
+          type_id: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: number
+          type_id: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: number
+          type_id?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_type"
+            columns: ["type_id"]
+            isOneToOne: false
+            referencedRelation: "book_type"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_tags: {
+        Row: {
+          created_at: string | null
+          id: number
+          tagID: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: number
+          tagID: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: number
+          tagID?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_tags_tagid_fkey"
+            columns: ["tagID"]
+            isOneToOne: false
+            referencedRelation: "tag"
+            referencedColumns: ["tagID"]
+          },
+        ]
+      }
     }
     Views: {
       books_with_details: {
@@ -468,7 +581,7 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      get_user_count: { Args: never; Returns: number }
     }
     Enums: {
       [_ in never]: never
@@ -597,6 +710,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

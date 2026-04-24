@@ -17,16 +17,13 @@ const DashboardPage = () => {
   // ================= USERS =================
   useEffect(() => {
     const loadUsers = async () => {
-      const { count, error } = await supabase
-        .from("profiles")
-        .select("userID", { count: "exact", head: true });
-
+      const { data, error } = await (supabase as any).rpc("get_user_count");
       if (error) {
         console.error("Error loading users:", error);
         return;
       }
 
-      setTotalUsers(count ?? 0);
+      setTotalUsers(data ?? 0);
     };
 
     loadUsers();
@@ -227,20 +224,20 @@ const DashboardPage = () => {
                   <span className="w-24 text-sm text-muted-foreground truncate">
                     {genre}
                   </span>
-
-                  <div className="flex-1 h-5 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full progress-bar transition-all duration-300"
-                      style={{
-                        width: `${percent}%`,
-                        background: `linear-gradient(90deg, ${color}, ${color}66)`,
-                      }}
+                  <div
+                    className="flex-1 h-5 rounded-full bg-muted overflow-hidden"
                     role="progressbar"
                     aria-label={`แนว ${genre}`}
-                    aria-valuenow={Number(percent) || 0}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                  />
+                  >
+                    <div
+                      className="h-full rounded-full progress-bar transition-all duration-300"
+                      style={
+                        {
+                          width: `${percent}%`,
+                          background: `linear-gradient(90deg, ${color}, ${color}99)`,
+                        }
+                      }
+                    />
                   </div>
 
                   <span className="text-sm font-medium w-12 text-right">

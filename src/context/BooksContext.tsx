@@ -35,18 +35,56 @@ interface BooksContextType {
   addBook: (book: FormData) => Promise<void>;
   updateBook: (id: string, book: FormData) => Promise<void>;
   deleteBook: (id: string) => Promise<void>;
-  patchBook: (id: string, patch: Partial<{ rating: number; reviewCount: number }>) => void;
+  patchBook: (
+    id: string,
+    patch: Partial<{ rating: number; reviewCount: number }>
+  ) => void;
   refetch: () => Promise<void>;
 }
 
 const BooksContext = createContext<BooksContextType | null>(null);
 
 /* =======================
+   ✅ type slug -> type_id
+======================= */
+const TYPE_ID_MAP: Record<string, number> = {
+  manga: 1,
+  novel: 2,
+  "light-novel": 3,
+};
+
+/* =======================
+   ✅ type_id -> type slug
+======================= */
+const TYPE_SLUG_MAP: Record<number, string> = {
+  1: "manga",
+  2: "novel",
+  3: "light-novel",
+};
+
+/* =======================
    ✅ Map DB → UI
 ======================= */
 function mapRow(row: any): Book {
+  // ถ้ามี join book_type ให้ใช้ slug จาก relation ก่อน
+  // ถ้าไม่มี ค่อย fallback จาก type_id
+  const resolvedType =
+    row.book_type?.slug ??
+    (typeof row.type_id === "number" ? TYPE_SLUG_MAP[row.type_id] : undefined) ??
+    "manga";
+
+  const resolvedTags = Array.isArray(row.bookTag)
+    ? row.bookTag
+        .map((bt: any) => bt.tag?.tagName)
+        .filter(Boolean)
+    : [];
+
   return {
+    // ✅ id หลักของ frontend ให้ตรงกับ bookID เสมอ
     id: String(row.bookID ?? ""),
+    // ✅ เก็บ bookID แยกไว้ด้วยสำหรับ debug / recommendation mapping
+    bookID: row.bookID ?? null,
+
     title: row.title ?? "",
     titleEn: row.titleEn ?? "",
     description: row.description ?? "",
@@ -54,47 +92,47 @@ function mapRow(row: any): Book {
     publishDate: row.publishDate ?? "",
     slug: row.slug ?? "",
 
-    // Relations from joined tables
     authorName: row.author?.authorName ?? "",
     author: row.author?.authorName ?? "",
 
     publisher: row.publisher?.publisherName ?? "",
     publisherName: row.publisher?.publisherName ?? "",
 
-    // type: prefer joined book_type.slug (e.g. 'manga','novel'), fallback to type_id if missing
-    type: (row.book_type && row.book_type.slug) ?? (typeof row.type_id === "number" ? String(row.type_id) : "manga"),
+    // ✅ ต้องเป็น slug ไม่ใช่ "1" "2" "3"
+    type: resolvedType,
 
-    // Tags come from bookTag -> tag
-    tags: row.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
-    genres: row.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
+    tags: resolvedTags,
+    genres: resolvedTags,
 
     isNew: row.is_new ?? false,
     isPopular: row.is_popular ?? false,
     rating: Number(row.rating ?? 0),
     reviewCount: Number(row.review_count ?? 0),
     price: Number(row.price ?? 0),
-  };
+  } as Book;
 }
 
 /* =======================
    🔥 FIND OR CREATE AUTHOR
 ======================= */
-const findOrCreateAuthor = async (authorName: string): Promise<number | null> => {
+const findOrCreateAuthor = async (
+  authorName: string
+): Promise<number | null> => {
   if (!authorName.trim()) return null;
 
-  const { data: existing } = await supabase
+  const { data: existing } = (await supabase
     .from("author" as any)
     .select("authorID")
     .eq("authorName", authorName.trim())
-    .maybeSingle() as any;
+    .maybeSingle()) as any;
 
   if (existing) return (existing as any).authorID;
 
-  const { data: newAuthor, error } = await supabase
+  const { data: newAuthor, error } = (await supabase
     .from("author" as any)
     .insert({ authorName: authorName.trim() })
     .select("authorID")
-    .single() as any;
+    .single()) as any;
 
   if (error) throw error;
   return (newAuthor as any).authorID;
@@ -103,22 +141,24 @@ const findOrCreateAuthor = async (authorName: string): Promise<number | null> =>
 /* =======================
    🔥 FIND OR CREATE PUBLISHER
 ======================= */
-const findOrCreatePublisher = async (publisherName: string): Promise<number | null> => {
+const findOrCreatePublisher = async (
+  publisherName: string
+): Promise<number | null> => {
   if (!publisherName.trim()) return null;
 
-  const { data: existing } = await supabase
+  const { data: existing } = (await supabase
     .from("publisher" as any)
     .select("publisherID")
     .eq("publisherName", publisherName.trim())
-    .maybeSingle() as any;
+    .maybeSingle()) as any;
 
   if (existing) return (existing as any).publisherID;
 
-  const { data: newPub, error } = await supabase
+  const { data: newPub, error } = (await supabase
     .from("publisher" as any)
     .insert({ publisherName: publisherName.trim() })
     .select("publisherID")
-    .single() as any;
+    .single()) as any;
 
   if (error) throw error;
   return (newPub as any).publisherID;
@@ -128,19 +168,22 @@ const findOrCreatePublisher = async (publisherName: string): Promise<number | nu
    🔥 INSERT TAG RELATION
 ======================= */
 const insertTags = async (bookID: number, tags: string[]) => {
-  for (const tagName of tags) {
-    let { data: tag } = await supabase
+  // กัน tag ซ้ำ เช่น ["โรแมนติก", "โรแมนติก"]
+  const uniqueTags = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+
+  for (const tagName of uniqueTags) {
+    let { data: tag } = (await supabase
       .from("tag" as any)
       .select("tagID")
       .eq("tagName", tagName)
-      .maybeSingle() as any;
+      .maybeSingle()) as any;
 
     if (!tag) {
-      const { data: newTag } = await supabase
+      const { data: newTag } = (await supabase
         .from("tag" as any)
         .insert({ tagName })
         .select("tagID")
-        .single() as any;
+        .single()) as any;
       tag = newTag as any;
     }
 
@@ -168,8 +211,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
   const fetchBooks = useCallback(async () => {
     setLoading(true);
 
-    // Query books with related author, publisher and tags (normalized schema)
-    const { data, error } = await supabase
+    const { data, error } = (await supabase
       .from("books")
       .select(
         `
@@ -211,9 +253,8 @@ export function BooksProvider({ children }: { children: ReactNode }) {
         )
       `
       )
-      .order("bookID", { ascending: false }) as any;
+      .order("bookID", { ascending: false })) as any;
 
-    // Log raw payload for easier debugging in browser console
     console.debug("RAW BOOK PAYLOAD:", data);
     console.log("BOOK DATA:", data);
     console.log("BOOK ERROR:", error);
@@ -236,20 +277,37 @@ export function BooksProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  const patchBook = useCallback((id: string, patch: Partial<{ rating: number; reviewCount: number }>) => {
-    console.debug("patchBook called", { id, patch });
-    setBooks((prev) => {
-      const next = prev.map((b) => (b.id === String(id) ? { ...b, ...patch } : b));
-      console.debug("books after patch (sample)", next.find((b) => b.id === String(id)));
-      return next;
-    });
-  }, []);
+  const patchBook = useCallback(
+    (id: string, patch: Partial<{ rating: number; reviewCount: number }>) => {
+      console.debug("patchBook called", { id, patch });
+
+      setBooks((prev) => {
+        const next = prev.map((b) =>
+          b.id === String(id)
+            ? {
+                ...b,
+                ...(patch.rating !== undefined ? { rating: patch.rating } : {}),
+                ...(patch.reviewCount !== undefined
+                  ? { reviewCount: patch.reviewCount }
+                  : {}),
+              }
+            : b
+        );
+
+        console.debug(
+          "books after patch (sample)",
+          next.find((b) => b.id === String(id))
+        );
+        return next;
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     fetchBooks();
   }, [fetchBooks]);
 
-  // Realtime: listen for review or book changes and refetch so UI stays in sync
   useEffect(() => {
     try {
       const channel = supabase
@@ -290,11 +348,15 @@ export function BooksProvider({ children }: { children: ReactNode }) {
   ======================= */
   const addBook = useCallback(
     async (book: FormData) => {
-      // Normalized insert: create/find author & publisher, insert book, then insert tags relations
-      const authorID = book.authorName ? await findOrCreateAuthor(book.authorName) : null;
-      const publisherID = book.publisherName ? await findOrCreatePublisher(book.publisherName) : null;
+      const authorID = book.authorName
+        ? await findOrCreateAuthor(book.authorName)
+        : null;
 
-      const { data, error } = await supabase
+      const publisherID = book.publisherName
+        ? await findOrCreatePublisher(book.publisherName)
+        : null;
+
+      const { data, error } = (await supabase
         .from("books" as any)
         .insert({
           title: book.title,
@@ -305,7 +367,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
           slug: book.slug ?? null,
           authorID,
           publisherID,
-          type_id: book.type ? Number(book.type) : null,
+          type_id: book.type ? TYPE_ID_MAP[book.type] ?? null : null,
           is_new: book.isNew ?? false,
           is_popular: book.isPopular ?? false,
           rating: book.rating ?? 0,
@@ -313,7 +375,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
           price: book.price ?? 0,
         })
         .select("bookID")
-        .single() as any;
+        .single()) as any;
 
       if (error) {
         console.error("Insert error:", error);
@@ -335,10 +397,15 @@ export function BooksProvider({ children }: { children: ReactNode }) {
     async (id: string, book: FormData) => {
       const bookID = Number(id);
 
-      const authorID = book.authorName ? await findOrCreateAuthor(book.authorName) : null;
-      const publisherID = book.publisherName ? await findOrCreatePublisher(book.publisherName) : null;
+      const authorID = book.authorName
+        ? await findOrCreateAuthor(book.authorName)
+        : null;
 
-      const { error } = await supabase
+      const publisherID = book.publisherName
+        ? await findOrCreatePublisher(book.publisherName)
+        : null;
+
+      const { error } = (await supabase
         .from("books" as any)
         .update({
           title: book.title,
@@ -349,14 +416,14 @@ export function BooksProvider({ children }: { children: ReactNode }) {
           slug: book.slug ?? null,
           authorID,
           publisherID,
-          type_id: book.type ? Number(book.type) : null,
+          type_id: book.type ? TYPE_ID_MAP[book.type] ?? null : null,
           is_new: book.isNew ?? false,
           is_popular: book.isPopular ?? false,
           rating: book.rating ?? 0,
           review_count: book.reviewCount ?? 0,
           price: book.price ?? 0,
         })
-        .eq("bookID", bookID) as any;
+        .eq("bookID", bookID)) as any;
 
       if (error) {
         console.error("Update error:", error);
@@ -376,12 +443,13 @@ export function BooksProvider({ children }: { children: ReactNode }) {
   const deleteBook = useCallback(
     async (id: string) => {
       const bookID = Number(id);
+
       await supabase.from("bookTag" as any).delete().eq("bookID", bookID);
 
-      const { error } = await supabase
+      const { error } = (await supabase
         .from("books" as any)
         .delete()
-        .eq("bookID", bookID) as any;
+        .eq("bookID", bookID)) as any;
 
       if (error) {
         console.error("Delete error:", error);
@@ -395,7 +463,17 @@ export function BooksProvider({ children }: { children: ReactNode }) {
 
   return (
     <BooksContext.Provider
-      value={{ books, loading, rawPayload, lastError, addBook, updateBook, deleteBook, patchBook, refetch: fetchBooks }}
+      value={{
+        books,
+        loading,
+        rawPayload,
+        lastError,
+        addBook,
+        updateBook,
+        deleteBook,
+        patchBook,
+        refetch: fetchBooks,
+      }}
     >
       {children}
     </BooksContext.Provider>
