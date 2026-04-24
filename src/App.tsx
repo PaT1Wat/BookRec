@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 import Navbar from "@/components/Navbar";
 import AIChatButton from "@/components/AIChatButton";
+import GenreOnboardingGate from "./components/GenreOnboardingGate"; // 🔥 เพิ่ม
 
 import Index from "./pages/Index";
 import SearchPage from "./pages/SearchPage";
@@ -38,7 +39,6 @@ const queryClient = new QueryClient();
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { user, isAdmin, loading } = useAuth();
 
-  // ⏳ Loading
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -49,12 +49,10 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // ❌ Not login
   if (!user) {
     return <Navigate to="/auth" replace />;
   }
 
-  // ❌ Not admin
   if (!isAdmin) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center text-center">
@@ -77,11 +75,13 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 function AppContent() {
   const location = useLocation();
 
-  // ❌ ซ่อน Navbar ในบางหน้า
   const hideNavbarRoutes = ["/auth", "/reset-password"];
 
   return (
     <>
+      {/* 🔥 POPUP GLOBAL */}
+      <GenreOnboardingGate />
+
       {/* Navbar */}
       {!hideNavbarRoutes.includes(location.pathname) && <Navbar />}
 
@@ -95,7 +95,7 @@ function AppContent() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/profile" element={<ProfilePage />} />
 
-        {/* 🔥 Admin Routes */}
+        {/* 🔥 Admin */}
         <Route
           path="/dashboard"
           element={

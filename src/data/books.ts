@@ -4,7 +4,12 @@ export type Genre = string;
 
 // ===== MAIN BOOK TYPE =====
 export interface Book {
+  // 🔥 IMPORTANT: ใช้ map กับ recommendation
+  bookID: number;     // ✅ เพิ่มตัวนี้
+
+  // ใช้ใน frontend routing
   id: string;
+
   title: string;
   titleEn?: string;
 
@@ -16,8 +21,8 @@ export interface Book {
 
   // relation (display)
   publisher?: string;
-  publisherName?: string; // เพิ่ม
-  authorName?: string;    // เพิ่ม
+  publisherName?: string;
+  authorName?: string;
   type?: BookType;
 
   tags: Genre[];

@@ -21,9 +21,6 @@ type Review = {
   };
 };
 
-/* =======================
-   ✅ Review Type
-======================= */
 const BookDetailPage = () => {
   const { id } = useParams();
   const { books = [], refetch: refetchBooks, patchBook } = useBooks();
@@ -38,6 +35,24 @@ const BookDetailPage = () => {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [myReview, setMyReview] = useState<Review | null>(null);
+
+  /* =======================
+     📝 Log interaction helper
+  ======================= */
+  const logInteraction = async (actionType: string, bookID: number) => {
+    if (!user) return;
+
+    try {
+      await supabase.from("interaction" as any).insert({
+        bookID,
+        user_id: user.id,
+        actionType,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.debug("Failed to log interaction:", actionType, err);
+    }
+  };
 
   /* =======================
      📥 Fetch Reviews
@@ -96,6 +111,14 @@ const BookDetailPage = () => {
   }, [id, user]);
 
   /* =======================
+     👁️ Log view interaction
+  ======================= */
+  useEffect(() => {
+    if (!id || !user) return;
+    logInteraction("view", Number(id));
+  }, [id, user]);
+
+  /* =======================
      💾 Submit Review
   ======================= */
   const handleSubmit = async () => {
@@ -109,23 +132,27 @@ const BookDetailPage = () => {
     }
 
     setSubmitting(true);
-    // optimistic update: update UI first, then persist
     const book = books.find((b) => b.id === id);
     const snapshot = book ? { rating: book.rating ?? 0, reviewCount: book.reviewCount ?? 0 } : null;
+
     try {
       if (book) {
         if (myReview) {
-          // editing existing: count stays same
           const oldRating = myReview.rating ?? 0;
           const count = book.reviewCount ?? 0;
-          const newAvg = count > 0 ? ((book.rating ?? 0) * count - oldRating + myRating) / count : myRating;
+          const newAvg =
+            count > 0
+              ? ((book.rating ?? 0) * count - oldRating + myRating) / count
+              : myRating;
           patchBook(String(id), { rating: Number(newAvg.toFixed(1)), reviewCount: count });
         } else {
-          // new review: increment count
           const oldRating = book.rating ?? 0;
           const oldCount = book.reviewCount ?? 0;
           const newCount = oldCount + 1;
-          const newAvg = newCount > 0 ? ((oldRating * oldCount) + myRating) / newCount : myRating;
+          const newAvg =
+            newCount > 0
+              ? (oldRating * oldCount + myRating) / newCount
+              : myRating;
           patchBook(String(id), { rating: Number(newAvg.toFixed(1)), reviewCount: newCount });
         }
       }
@@ -135,7 +162,9 @@ const BookDetailPage = () => {
           .from("review" as any)
           .update({ rating: myRating, comment: comment.trim() })
           .eq("reviewID", myReview.reviewID);
+
         if (error) throw error;
+        await logInteraction("review", Number(id));
         toast({ title: "แก้ไขรีวิวสำเร็จ ✅" });
       } else {
         const { error } = await supabase
@@ -147,31 +176,46 @@ const BookDetailPage = () => {
             comment: comment.trim(),
             createdAt: new Date().toISOString(),
           });
+
         if (error) throw error;
+        await logInteraction("review", Number(id));
         toast({ title: "รีวิวสำเร็จ ✅" });
       }
 
-      // refresh canonical data
       try {
         const reviewsAfter = await fetchReviews(Number(id));
         const avg = reviewsAfter.length
           ? reviewsAfter.reduce((s, r) => s + (r.rating ?? 0), 0) / reviewsAfter.length
           : 0;
-        if (id) patchBook(String(id), { rating: Number(avg.toFixed(1)), reviewCount: reviewsAfter.length });
+
+        if (id) {
+          patchBook(String(id), {
+            rating: Number(avg.toFixed(1)),
+            reviewCount: reviewsAfter.length,
+          });
+        }
       } catch (e) {
         console.debug("Unable to refresh reviews after submit", e);
       }
+
       try {
         await refetchBooks();
       } catch (e) {
         console.debug("Failed to refetch books after submit", e);
       }
     } catch (err: any) {
-      // rollback optimistic
       if (snapshot && id) {
-        patchBook(String(id), { rating: snapshot.rating, reviewCount: snapshot.reviewCount });
+        patchBook(String(id), {
+          rating: snapshot.rating,
+          reviewCount: snapshot.reviewCount,
+        });
       }
-      toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
+
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: err.message,
+        variant: "destructive",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -182,19 +226,29 @@ const BookDetailPage = () => {
   ======================= */
   const handleDelete = async () => {
     if (!myReview) return;
-    // optimistic delete: patch UI then delete
+
     const book = books.find((b) => b.id === id);
     const snapshot = book ? { rating: book.rating ?? 0, reviewCount: book.reviewCount ?? 0 } : null;
+
     try {
       if (book) {
         const oldRating = myReview.rating ?? 0;
         const oldCount = book.reviewCount ?? 0;
         const newCount = Math.max(0, oldCount - 1);
-        const newAvg = newCount > 0 ? (((book.rating ?? 0) * oldCount - oldRating) / newCount) : 0;
-        patchBook(String(id), { rating: Number(newAvg.toFixed(1)), reviewCount: newCount });
+        const newAvg =
+          newCount > 0
+            ? (((book.rating ?? 0) * oldCount - oldRating) / newCount)
+            : 0;
+
+        patchBook(String(id), {
+          rating: Number(newAvg.toFixed(1)),
+          reviewCount: newCount,
+        });
       }
 
       await supabase.from("review" as any).delete().eq("reviewID", myReview.reviewID);
+      await logInteraction("review_delete", Number(id));
+
       setMyReview(null);
       setMyRating(0);
       setComment("");
@@ -206,15 +260,43 @@ const BookDetailPage = () => {
         console.debug("Failed to refetch books after delete", e);
       }
     } catch (err: any) {
-      // rollback
       if (snapshot && id) {
-        patchBook(String(id), { rating: snapshot.rating, reviewCount: snapshot.reviewCount });
+        patchBook(String(id), {
+          rating: snapshot.rating,
+          reviewCount: snapshot.reviewCount,
+        });
       }
-      toast({ title: "เกิดข้อผิดพลาด", description: err.message, variant: "destructive" });
+
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: err.message,
+        variant: "destructive",
+      });
     }
   };
 
-  // ⏳ Loading
+    /* =======================
+     ❤️ Toggle Favorite + Log Interaction
+  ======================= */
+  const handleFavoriteToggle = async () => {
+    try {
+      const wasFav = check(book.id);
+
+      await toggle(book.id);
+
+      if (user && id) {
+        await logInteraction(wasFav ? "unfavorite" : "favorite", Number(id));
+      }
+    } catch (err) {
+      console.debug("Failed to toggle favorite from detail page:", err);
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถอัปเดตรายการโปรดได้",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (!books.length) {
     return (
       <div className="container py-20 text-center">
@@ -229,7 +311,9 @@ const BookDetailPage = () => {
     return (
       <div className="container py-20 text-center">
         <p className="text-lg text-muted-foreground">ไม่พบหนังสือ</p>
-        <Link to="/" className="mt-4 inline-block text-primary hover:underline">กลับหน้าแรก</Link>
+        <Link to="/" className="mt-4 inline-block text-primary hover:underline">
+          กลับหน้าแรก
+        </Link>
       </div>
     );
   }
@@ -247,14 +331,15 @@ const BookDetailPage = () => {
 
   return (
     <div className="container py-8">
-      {/* 🔙 Back */}
-      <Link to="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
+      <Link
+        to="/"
+        className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
+      >
         <ArrowLeft className="h-4 w-4" />
         กลับ
       </Link>
 
       <div className="grid gap-8 md:grid-cols-[280px_1fr]">
-        {/* 📕 Cover */}
         <div className="space-y-4">
           <div className="overflow-hidden rounded-xl shadow-card">
             <img
@@ -264,7 +349,7 @@ const BookDetailPage = () => {
             />
           </div>
           <button
-            onClick={() => toggle(book.id)}
+            onClick={handleFavoriteToggle}
             className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition-all ${
               isFav
                 ? "bg-destructive/10 text-destructive border border-destructive/30"
@@ -276,31 +361,42 @@ const BookDetailPage = () => {
           </button>
         </div>
 
-        {/* 📖 Detail */}
         <div className="space-y-6">
           <div>
             <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              {book.type === "manga" ? "มังงะ" : book.type === "light-novel" ? "ไลท์โนเวล" : "นิยาย"}
+              {book.type === "manga"
+                ? "มังงะ"
+                : book.type === "light-novel"
+                ? "ไลท์โนเวล"
+                : "นิยาย"}
             </span>
-            <h1 className="mt-3 text-3xl font-extrabold text-foreground font-display">{book.title}</h1>
-            {book.titleEn && <p className="mt-1 text-lg text-muted-foreground">{book.titleEn}</p>}
+            <h1 className="mt-3 text-3xl font-extrabold text-foreground font-display">
+              {book.title}
+            </h1>
+            {book.titleEn && (
+              <p className="mt-1 text-lg text-muted-foreground">{book.titleEn}</p>
+            )}
           </div>
 
-          {/* ⭐ Rating */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Star key={i} className={`h-5 w-5 ${i < Math.round(avgRating) ? "fill-star text-star" : "text-muted-foreground/30"}`} />
+                <Star
+                  key={i}
+                  className={`h-5 w-5 ${
+                    i < Math.round(avgRating)
+                      ? "fill-star text-star"
+                      : "text-muted-foreground/30"
+                  }`}
+                />
               ))}
             </div>
             <span className="text-lg font-bold text-foreground">{avgRating.toFixed(1)}</span>
             <span className="text-sm text-muted-foreground">({reviews.length} รีวิว)</span>
           </div>
 
-          {/* 💰 Price */}
           <div className="text-2xl font-bold text-primary">฿{book.price ?? 0}</div>
 
-          {/* 👤 Author / Publisher */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2 rounded-lg bg-secondary p-3">
               <User className="h-4 w-4 text-primary" />
@@ -318,30 +414,38 @@ const BookDetailPage = () => {
             </div>
           </div>
 
-          {/* 📝 Description */}
           <div>
             <h3 className="mb-2 text-sm font-semibold text-foreground">เรื่องย่อ</h3>
-            <p className="text-sm leading-relaxed text-muted-foreground">{book.description || "ไม่มีคำอธิบาย"}</p>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {book.description || "ไม่มีคำอธิบาย"}
+            </p>
           </div>
 
-          {/* 🏷️ Genres & Tags */}
           <div>
             <h3 className="mb-2 text-sm font-semibold text-foreground">แนว & แท็ก</h3>
             <div className="flex flex-wrap gap-2">
               {genres.map((g) => (
-                <Link key={g} to={`/search?genre=${g}`} className="rounded-full bg-tag-bg px-3 py-1 text-xs font-medium text-tag-fg hover:bg-primary/10 transition-colors">{g}</Link>
+                <Link
+                  key={g}
+                  to={`/search?genre=${g}`}
+                  className="rounded-full bg-tag-bg px-3 py-1 text-xs font-medium text-tag-fg hover:bg-primary/10 transition-colors"
+                >
+                  {g}
+                </Link>
               ))}
               {tags.map((t) => (
-                <span key={t} className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">#{t}</span>
+                <span
+                  key={t}
+                  className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground"
+                >
+                  #{t}
+                </span>
               ))}
             </div>
           </div>
         </div>
       </div>
 
-      {/* =====================
-          ✍️ เขียนรีวิว
-      ===================== */}
       <section className="mt-12">
         <h2 className="mb-6 text-xl font-bold text-foreground font-display">
           ✍️ {myReview ? "แก้ไขรีวิวของคุณ" : "เขียนรีวิว"}
@@ -349,11 +453,13 @@ const BookDetailPage = () => {
 
         {!user ? (
           <div className="rounded-2xl border border-border bg-card p-6 text-center text-muted-foreground">
-            <Link to="/auth" className="text-primary hover:underline">เข้าสู่ระบบ</Link> เพื่อเขียนรีวิว
+            <Link to="/auth" className="text-primary hover:underline">
+              เข้าสู่ระบบ
+            </Link>{" "}
+            เพื่อเขียนรีวิว
           </div>
         ) : (
           <div className="rounded-2xl border border-border bg-card p-6 space-y-4">
-            {/* ดาวให้คะแนน */}
             <div>
               <p className="text-sm font-medium mb-2">คะแนน</p>
               <div className="flex gap-1">
@@ -366,20 +472,23 @@ const BookDetailPage = () => {
                     onMouseLeave={() => setHoverRating(0)}
                     onClick={() => setMyRating(s)}
                   >
-                    <Star className={`h-8 w-8 transition-colors ${
-                      s <= (hoverRating || myRating)
-                        ? "fill-amber-400 text-amber-400"
-                        : "text-muted-foreground/30"
-                    }`} />
+                    <Star
+                      className={`h-8 w-8 transition-colors ${
+                        s <= (hoverRating || myRating)
+                          ? "fill-amber-400 text-amber-400"
+                          : "text-muted-foreground/30"
+                      }`}
+                    />
                   </button>
                 ))}
                 {myRating > 0 && (
-                  <span className="ml-2 self-center text-sm text-muted-foreground">{myRating}/5</span>
+                  <span className="ml-2 self-center text-sm text-muted-foreground">
+                    {myRating}/5
+                  </span>
                 )}
               </div>
             </div>
 
-            {/* ความคิดเห็น */}
             <div>
               <p className="text-sm font-medium mb-2">ความคิดเห็น</p>
               <textarea
@@ -391,7 +500,6 @@ const BookDetailPage = () => {
               />
             </div>
 
-            {/* ปุ่ม */}
             <div className="flex gap-2">
               <Button onClick={handleSubmit} disabled={submitting} className="gap-2">
                 <Send className="h-4 w-4" />
@@ -407,14 +515,13 @@ const BookDetailPage = () => {
         )}
       </section>
 
-      {/* =====================
-          📋 รีวิวทั้งหมด
-      ===================== */}
       <section className="mt-8">
         <h2 className="mb-6 text-xl font-bold text-foreground font-display">
           💬 รีวิวทั้งหมด
           {reviews.length > 0 && (
-            <span className="ml-2 text-sm font-normal text-muted-foreground">({reviews.length} รีวิว)</span>
+            <span className="ml-2 text-sm font-normal text-muted-foreground">
+              ({reviews.length} รีวิว)
+            </span>
           )}
         </h2>
 
@@ -435,11 +542,14 @@ const BookDetailPage = () => {
                     : "border-border bg-card"
                 }`}
               >
-                {/* Header */}
                 <div className="flex items-center gap-3">
                   <div className="h-9 w-9 rounded-full bg-muted overflow-hidden flex items-center justify-center flex-shrink-0">
                     {r.profiles?.avatar_url ? (
-                      <img src={r.profiles.avatar_url} alt="" className="h-full w-full object-cover" />
+                      <img
+                        src={r.profiles.avatar_url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
                     ) : (
                       <User className="h-4 w-4 text-muted-foreground" />
                     )}
@@ -454,13 +564,14 @@ const BookDetailPage = () => {
                     <p className="text-xs text-muted-foreground">
                       {r.createdAt
                         ? new Date(r.createdAt).toLocaleDateString("th-TH", {
-                            year: "numeric", month: "short", day: "numeric",
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
                           })
                         : ""}
                     </p>
                   </div>
 
-                  {/* ดาว */}
                   <div className="ml-auto flex gap-0.5">
                     {[1, 2, 3, 4, 5].map((s) => (
                       <Star
@@ -475,7 +586,6 @@ const BookDetailPage = () => {
                   </div>
                 </div>
 
-                {/* ความคิดเห็น */}
                 {r.comment && (
                   <p className="text-sm text-muted-foreground leading-relaxed pl-12">
                     {r.comment}
@@ -487,10 +597,11 @@ const BookDetailPage = () => {
         )}
       </section>
 
-      {/* 📚 Related */}
       {relatedBooks.length > 0 && (
         <section className="mt-12">
-          <h2 className="mb-6 text-xl font-bold text-foreground font-display">📚 หนังสือที่คล้ายกัน</h2>
+          <h2 className="mb-6 text-xl font-bold text-foreground font-display">
+            📚 หนังสือที่คล้ายกัน
+          </h2>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
             {relatedBooks.map((b) => (
               <BookCard key={b.id} book={b} />
