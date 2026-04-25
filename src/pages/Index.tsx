@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo  } from "react";
 import { useBooks } from "@/context/BooksContext";
 import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
@@ -20,7 +20,8 @@ const GENRE_MAP: Record<string, string> = {
   "ชีวิตประจำวัน": "ชีวิตประจำวัน",
   "ผจญภัย": "ผจญภัย",
   "เหนือธรรมชาติ": "ไซไฟ",
-  "GL/BL": "GL/BL",
+  "BL ( Boy Love )": "BL ( Boy Love )",
+  "GL ( Girl Love )": "GL ( Girl Love )",
 };
 
 const GENRE_LABELS = Object.keys(GENRE_MAP);
@@ -31,11 +32,74 @@ const Index = () => {
 
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
   const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
+  const [preferredGenres, setPreferredGenres] = useState<string[]>([]);
 
   const dbGenre = selectedGenre ? GENRE_MAP[selectedGenre] : null;
 
+  useEffect(() => {
+    if (!user) {
+      setPreferredGenres([]);
+      return;
+    }
+
+    const fetchPreferredGenres = async () => {
+      const { data, error } = await supabase
+        .from("user_tags")
+        .select(`
+          tagID,
+          tag:tagID (
+            tagName,
+            tagType
+          )
+        `)
+        .eq("user_id", user.id);
+
+      if (error) {
+        console.error("[preferred genres] error:", error);
+        setPreferredGenres([]);
+        return;
+      }
+
+      const genres =
+        data
+          ?.filter((item: any) => item.tag?.tagType === "genre")
+          .map((item: any) => item.tag?.tagName)
+          .filter(Boolean) ?? [];
+
+      console.log("[preferred genres]:", genres);
+
+      setPreferredGenres(genres);
+    };
+
+    fetchPreferredGenres();
+  }, [user?.id]);
+
   const filterByGenre = (list: typeof books) =>
     dbGenre ? list.filter((b) => (b.genres ?? []).includes(dbGenre)) : list;
+
+  const getPreferredFallbackIds = () => {
+    const sourceGenres = dbGenre ? [dbGenre] : preferredGenres;
+
+    const matched = books
+      .filter((b) => {
+        const bookGenres = b.genres ?? b.tags ?? [];
+
+        if (sourceGenres.length === 0) {
+          return b.isPopular;
+        }
+
+        return sourceGenres.some((g) => bookGenres.includes(g));
+      })
+      .slice(0, RECOMMEND_LIMIT)
+      .map((b) => String((b as any).bookID ?? b.id));
+
+    if (matched.length > 0) return matched;
+
+   return books
+      .filter((b) => b.isPopular)
+      .slice(0, RECOMMEND_LIMIT)
+      .map((b) => String((b as any).bookID ?? b.id));
+  };
 
   const popularBooks = filterByGenre(books.filter((b) => b.isPopular));
   const newBooks = filterByGenre(books.filter((b) => b.isNew));
@@ -55,12 +119,8 @@ const Index = () => {
 
         // guest → fallback popular ตามแนวที่เลือก
         if (!user) {
-          const fallbackIds = books
-            .filter((b) => b.isPopular)
-            .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
-            .slice(0, RECOMMEND_LIMIT)
-            .map((b) => String((b as any).bookID ?? b.id));
-
+          const fallbackIds = getPreferredFallbackIds();
+          
           console.log("[recs] guest fallback ids:", fallbackIds);
           setRecommendedIds(fallbackIds);
           return;
@@ -79,12 +139,9 @@ const Index = () => {
         if (favErr || revErr || intErr) {
           console.error("[recs] Error checking interactions:", favErr || revErr || intErr);
 
-          const fallbackIds = books
-            .filter((b) => b.isPopular)
-            .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
-            .slice(0, RECOMMEND_LIMIT)
-            .map((b) => String((b as any).bookID ?? b.id));
+          const fallbackIds = getPreferredFallbackIds();
 
+          console.log("[recs] guest fallback ids:", fallbackIds);
           setRecommendedIds(fallbackIds);
           return;
         }
@@ -101,13 +158,9 @@ const Index = () => {
         console.log("[recs] hasInteraction:", hasInteraction);
 
         if (!hasInteraction) {
-          const fallbackIds = books
-            .filter((b) => b.isPopular)
-            .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
-            .slice(0, RECOMMEND_LIMIT)
-            .map((b) => String((b as any).bookID ?? b.id));
+          const fallbackIds = getPreferredFallbackIds();
 
-          console.log("[recs] cold-start fallback ids:", fallbackIds);
+          console.log("[recs] guest fallback ids:", fallbackIds);
           setRecommendedIds(fallbackIds);
           return;
         }
@@ -122,13 +175,9 @@ const Index = () => {
         console.log("[recs] backend response ok:", resp.ok);
 
         if (!resp.ok) {
-          const fallbackIds = books
-            .filter((b) => b.isPopular)
-            .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
-            .slice(0, RECOMMEND_LIMIT)
-            .map((b) => String((b as any).bookID ?? b.id));
+          const fallbackIds = getPreferredFallbackIds();
 
-          console.warn("[recs] backend failed, fallback to popular");
+          console.log("[recs] guest fallback ids:", fallbackIds);
           setRecommendedIds(fallbackIds);
           return;
         }
@@ -139,13 +188,9 @@ const Index = () => {
         console.log("[recs] backend ids:", ids);
 
         if (ids.length === 0) {
-          const fallbackIds = books
-            .filter((b) => b.isPopular)
-            .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
-            .slice(0, RECOMMEND_LIMIT)
-            .map((b) => String((b as any).bookID ?? b.id));
+          const fallbackIds = getPreferredFallbackIds();
 
-          console.log("[recs] empty backend ids, fallback ids:", fallbackIds);
+          console.log("[recs] guest fallback ids:", fallbackIds);
           setRecommendedIds(fallbackIds);
           return;
         }
@@ -154,28 +199,73 @@ const Index = () => {
       } catch (err) {
         console.error("[recs] Failed to fetch recommendations:", err);
 
-        const fallbackIds = books
-          .filter((b) => b.isPopular)
-          .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
-          .slice(0, RECOMMEND_LIMIT)
-          .map((b) => String((b as any).bookID ?? b.id));
+        const fallbackIds = getPreferredFallbackIds();
 
+        console.log("[recs] guest fallback ids:", fallbackIds);
         setRecommendedIds(fallbackIds);
+        return;
       }
     };
 
     fetchRecs();
-  }, [user?.id, books, dbGenre]);
+  }, [user?.id, books, dbGenre, preferredGenres]);
 
-  const recommendedBooks = recommendedIds
-    .map((id) =>
-      books.find((b) => {
-        const candidateId = String((b as any).bookID ?? b.id);
-        return candidateId === String(id);
+  const recommendedBooks = useMemo(() => {
+    // 1. ถ้ามี backend แนะนำ → ใช้ก่อน
+    const byBackend = recommendedIds
+      .map((id) =>
+        books.find((b) => {
+          const candidateId = String((b as any).bookID ?? b.id);
+          return candidateId === String(id);
+        })
+      )
+      .filter(Boolean) as typeof books;
+
+    // 🔥 ถ้ามีแนวที่ user เลือก → ใช้ก่อน
+  if (user && preferredGenres.length > 0) {
+    return [...books]
+      .map((book) => {
+        const bookGenres = book.genres ?? book.tags ?? [];
+        const score = bookGenres.filter((g: string) =>
+          preferredGenres.includes(g)
+        ).length;
+
+        return { book, score };
       })
-    )
-    .filter(Boolean)
-    .slice(0, RECOMMEND_LIMIT) as typeof books;
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.book)
+      .slice(0, RECOMMEND_LIMIT);
+  }
+
+  // 🔥 ค่อย fallback ไป backend
+  if (byBackend.length > 0) {
+    return byBackend.slice(0, RECOMMEND_LIMIT);
+  }
+
+    // 2. ใช้แนวจาก popup (user_tags)
+    if (user && preferredGenres.length > 0) {
+      return [...books]
+        .map((book) => {
+          const bookGenres = book.genres ?? book.tags ?? [];
+          const score = bookGenres.filter((g: string) =>
+            preferredGenres.includes(g)
+          ).length;
+
+          return { book, score };
+        })
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((item) => item.book)
+        .slice(0, RECOMMEND_LIMIT);
+    }
+
+    // 3. fallback → popular
+    return books
+      .filter((b) => b.isPopular)
+      .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
+      .slice(0, RECOMMEND_LIMIT);
+  }, [recommendedIds, books, user, preferredGenres, dbGenre]);
 
   console.log("[recs] selectedGenre:", selectedGenre);
   console.log("[recs] dbGenre:", dbGenre);

@@ -1,18 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Navigate, Link } from "react-router-dom";
-import {
-  Camera,
-  Save,
-  User,
-  Star,
-  BookOpen,
-  Sparkles,
-} from "lucide-react";
+import { Camera, Save, User, Star, BookOpen } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import GenreOnboardingModal from "@/components/GenreOnboardingModal";
 
 type ReviewItem = {
   reviewID: number;
@@ -39,6 +33,8 @@ const ProfilePage = () => {
 
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [reviewLoading, setReviewLoading] = useState(true);
+  const [interestTags, setInterestTags] = useState<string[]>([]);
+  const [showGenreModal, setShowGenreModal] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -83,23 +79,56 @@ const ProfilePage = () => {
     fetchReviews();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchTags = async () => {
+      const { data, error } = await supabase
+        .from("user_tags")
+        .select(`
+          tagID,
+          tag:tagID (
+            tagName,
+            tagType
+          )
+        `)
+        .eq("user_id", user.id);
+
+      if (error) {
+        console.error("fetchTags error:", error);
+        setInterestTags([]);
+        return;
+      }
+
+      const names =
+        data
+        ?.filter((item: any) => item.tag?.tagType === "genre")
+        .map((item: any) => item.tag?.tagName)
+        .filter(Boolean) || [];
+
+      setInterestTags(names);
+    };
+
+    fetchTags();
+  }, [user]);
+
   const stats = useMemo(() => {
     const reviewCount = reviews.length;
 
     const avgRating =
       reviewCount > 0
         ? (
-            reviews.reduce((sum, r) => sum + Number(r.rating || 0), 0) / reviewCount
+            reviews.reduce((sum, r) => sum + Number(r.rating || 0), 0) /
+            reviewCount
           ).toFixed(1)
         : "0.0";
 
     return {
       reviewCount,
       avgRating,
-      favoriteGenre: "ยังไม่มีข้อมูล",
-      topGenres: [] as string[],
+      topGenres: interestTags,
     };
-  }, [reviews]);
+  }, [reviews, interestTags]);
 
   if (loading) {
     return (
@@ -141,7 +170,7 @@ const ProfilePage = () => {
     } catch (err: any) {
       toast({
         title: "อัปโหลดล้มเหลว",
-        description: err.message,
+        description: err?.message || "ไม่สามารถอัปโหลดรูปได้",
         variant: "destructive",
       });
     } finally {
@@ -158,23 +187,40 @@ const ProfilePage = () => {
     setSaving(true);
 
     try {
-      const { error } = await supabase.from("profiles").upsert(
+      const cleanName = displayName.trim();
+
+      const { error: profileError } = await supabase.from("profiles").upsert(
         {
           userID: user.id,
-          display_name: displayName.trim(),
+          display_name: cleanName,
           avatar_url: avatarUrl || null,
         },
         { onConflict: "userID" }
       );
 
-      if (error) throw error;
+      if (profileError) throw profileError;
+
+      const { error: userError } = await supabase
+        .from("user")
+        .update({
+          userName: cleanName,
+          display_name: cleanName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      if (userError) throw userError;
 
       await refreshProfile();
-      toast({ title: "บันทึกโปรไฟล์สำเร็จ ✅" });
+
+      toast({
+        title: "บันทึกโปรไฟล์สำเร็จ ✅",
+        description: "อัปเดตชื่อที่แสดงเรียบร้อยแล้ว",
+      });
     } catch (err: any) {
       toast({
         title: "เกิดข้อผิดพลาด",
-        description: err.message,
+        description: err?.message || "บันทึกโปรไฟล์ไม่สำเร็จ",
         variant: "destructive",
       });
     } finally {
@@ -191,17 +237,13 @@ const ProfilePage = () => {
         </h1>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+      <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
           <div className="flex flex-col items-center gap-4">
             <div className="group relative">
               <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-primary/20 bg-muted transition group-hover:scale-105">
                 {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt="รูปโปรไฟล์"
-                    className="h-full w-full object-cover"
-                  />
+                  <img src={avatarUrl} alt="รูปโปรไฟล์" className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center">
                     <User className="h-12 w-12 text-muted-foreground" />
@@ -215,7 +257,7 @@ const ProfilePage = () => {
                 title="อัปโหลดรูปโปรไฟล์"
                 onClick={() => fileRef.current?.click()}
                 disabled={uploading}
-                className="absolute bottom-0 right-0 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                className="absolute bottom-0 right-0 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-110 disabled:opacity-50"
               >
                 <Camera className="h-4 w-4" />
               </button>
@@ -225,7 +267,8 @@ const ProfilePage = () => {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                aria-label="เลือกไฟล์รูปโปรไฟล์"
+                aria-label="เลือกรูปโปรไฟล์"
+                title="เลือกรูปโปรไฟล์"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) handleAvatarUpload(f);
@@ -247,53 +290,64 @@ const ProfilePage = () => {
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-3 gap-3">
-            <div className="rounded-2xl border border-border/60 bg-muted/30 p-4 text-center">
-              <div className="text-xl font-bold text-foreground">
+          <div className="mt-6 grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 text-center">
+              <div className="text-2xl font-bold text-foreground">
                 {stats.reviewCount}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">รีวิว</div>
             </div>
 
-            <div className="rounded-2xl border border-border/60 bg-muted/30 p-4 text-center">
-              <div className="text-xl font-bold text-foreground">
+            <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 text-center">
+              <div className="text-2xl font-bold text-foreground">
                 {stats.avgRating}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">คะแนนเฉลี่ย</div>
             </div>
 
-            <div className="rounded-2xl border border-border/60 bg-muted/30 p-4 text-center">
-              <div className="flex min-h-[32px] items-center justify-center">
-                {stats.favoriteGenre !== "ยังไม่มีข้อมูล" ? (
-                  <span className="inline-flex max-w-full items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                    <span className="line-clamp-1">{stats.favoriteGenre}</span>
-                  </span>
-                ) : (
-                  <span className="text-base font-semibold text-muted-foreground">-</span>
-                )}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {stats.favoriteGenre !== "ยังไม่มีข้อมูล" ? "แนวโปรด" : "ยังไม่มีข้อมูล"}
-              </div>
+            <div className="col-span-2 rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 to-primary/5 p-4 text-left">
+              <p className="text-xs font-semibold text-muted-foreground">
+                แนวหนังสือที่สนใจ
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setShowGenreModal(true)}
+                className="text-xs font-bold text-primary hover:underline"
+              >
+                แก้ไขแนวที่ชอบ
+              </button>
+
+              {stats.topGenres.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {stats.topGenres.slice(0, 4).map((genre) => (
+                    <span
+                      key={genre}
+                      className="rounded-full bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-sm"
+                    >
+                      {genre}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm font-medium text-muted-foreground">
+                  ยังไม่มีข้อมูลแนวหนังสือที่ชอบ
+                </p>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-5">
+        <div className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-5">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">
-              ข้อมูลโปรไฟล์
-            </h2>
+            <h2 className="text-lg font-semibold text-foreground">ข้อมูลโปรไฟล์</h2>
             <p className="text-sm text-muted-foreground">
               จัดการข้อมูลที่ใช้แสดงบนเว็บไซต์
             </p>
           </div>
 
           <div className="space-y-1">
-            <label
-              htmlFor="displayName"
-              className="text-sm font-medium text-muted-foreground"
-            >
+            <label htmlFor="displayName" className="text-sm font-medium text-muted-foreground">
               ชื่อที่แสดง
             </label>
             <Input
@@ -306,18 +360,10 @@ const ProfilePage = () => {
           </div>
 
           <div className="space-y-1">
-            <label
-              htmlFor="email"
-              className="text-sm font-medium text-muted-foreground"
-            >
+            <label htmlFor="email" className="text-sm font-medium text-muted-foreground">
               อีเมล
             </label>
-            <Input
-              id="email"
-              value={user.email || ""}
-              disabled
-              className="opacity-60"
-            />
+            <Input id="email" value={user.email || ""} disabled className="opacity-60" />
           </div>
 
           <Button onClick={handleSave} disabled={saving} className="w-full gap-2">
@@ -325,30 +371,6 @@ const ProfilePage = () => {
             {saving ? "กำลังบันทึก..." : "บันทึกโปรไฟล์"}
           </Button>
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-bold text-foreground">รสนิยมการอ่านของคุณ</h2>
-        </div>
-
-        {stats.topGenres.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {stats.topGenres.map((genre) => (
-              <span
-                key={genre}
-                className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
-              >
-                {genre}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            ยังไม่มีข้อมูลเพียงพอสำหรับวิเคราะห์แนวที่คุณชอบ
-          </p>
-        )}
       </div>
 
       <div className="space-y-4">
@@ -365,11 +387,11 @@ const ProfilePage = () => {
         </div>
 
         {reviewLoading ? (
-          <div className="rounded-2xl border border-border bg-card p-8 text-center text-muted-foreground animate-pulse">
+          <div className="rounded-3xl border border-border bg-card p-8 text-center text-muted-foreground animate-pulse">
             กำลังโหลดรีวิว...
           </div>
         ) : reviews.length === 0 ? (
-          <div className="rounded-2xl border border-border bg-card p-8 text-center">
+          <div className="rounded-3xl border border-border bg-card p-8 text-center">
             <BookOpen className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
             <p className="text-muted-foreground">ยังไม่มีรีวิวของคุณ</p>
           </div>
@@ -379,11 +401,11 @@ const ProfilePage = () => {
               <Link
                 key={r.reviewID}
                 to={`/book/${r.book?.bookID}`}
-                className="flex gap-4 rounded-2xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
+                className="flex gap-4 rounded-3xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
               >
                 <img
                   src={r.book?.coverImage || "/placeholder.svg"}
-                  alt={r.book?.title}
+                  alt={r.book?.title || "หนังสือ"}
                   className="h-24 w-16 rounded-lg object-cover flex-shrink-0"
                 />
 
@@ -429,6 +451,16 @@ const ProfilePage = () => {
           </div>
         )}
       </div>
+
+      <GenreOnboardingModal 
+        userId={user.id}
+        open={showGenreModal}
+        onDone={() => {
+          setShowGenreModal(false);
+          window.location.reload();
+        }}
+      />
+      
     </div>
   );
 };
