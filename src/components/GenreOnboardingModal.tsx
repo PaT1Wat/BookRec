@@ -27,8 +27,9 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
     const fetchTags = async () => {
       const { data, error } = await supabase
         .from("tag")
-        .select("tagID, tagName")
-        .order("tagName");
+        .select("tagID, tagName, tagType")
+        .eq("tagType", "genre")
+        .order("tagID", { ascending: true });
 
       if (error) {
         console.error("fetch tags error:", error);
@@ -52,9 +53,9 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
   };
 
   const handleSave = async () => {
-    if (selected.length < 3) {
+    if (selected.length < 1) {
       toast({
-        title: "เลือกอย่างน้อย 3 แนว",
+        title: "เลือกอย่างน้อย 1 แนว",
         description: "เพื่อให้ระบบแนะนำหนังสือได้แม่นยำ",
         variant: "destructive",
       });
@@ -97,7 +98,7 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
         <h2 className="text-xl font-bold">เลือกแนวหนังสือที่คุณสนใจ</h2>
 
         <p className="mt-1 text-sm text-muted-foreground">
-          เลือกอย่างน้อย 3 แนว เพื่อให้ระบบแนะนำแม่นขึ้น
+          เลือกอย่างน้อย 1 แนว เพื่อให้ระบบแนะนำแม่นขึ้น
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">

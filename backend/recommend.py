@@ -196,6 +196,28 @@ def _clean_book_ids(values):
     return cleaned
 
 
+def _get_user_preferred_tag_ids(user_id: str):
+    try:
+        rows = (
+            supabase
+            .table("user_tags")
+            .select("tagID")
+            .eq("user_id", user_id)
+            .execute()
+            .data
+            or []
+        )
+
+        return {
+            int(r["tagID"])
+            for r in rows
+            if r.get("tagID") is not None
+        }
+    except Exception as e:
+        print("[recommend] fetch user_tags failed:", e)
+        return set()
+
+
 def _build_item_activity(favs, reviews, interactions):
     activity = defaultdict(float)
 
@@ -301,6 +323,7 @@ def _content_profile_fallback(
     genre: str | None = None,
 ):
     interacted = _get_interacted_book_ids_for_user(user_id, favs, reviews, interactions)
+    preferred_tag_ids = _get_user_preferred_tag_ids(user_id)
     if not books:
         return []
 
@@ -368,6 +391,17 @@ def _content_profile_fallback(
             continue
 
         score = 0.0
+        
+        book_tag_ids = {
+            int(bt.get("tagID"))
+            for bt in book_tags
+            if str(bt.get("bookID")) == bid and bt.get("tagID") is not None
+        }
+        
+        matched_user_tags = preferred_tag_ids.intersection(book_tag_ids)
+
+        if matched_user_tags:
+            score += 10.0 * len(matched_user_tags)
 
         for tag in book_tag_names.get(bid, set()):
             score += preferred_tags.get(tag, 0.0) * 2.5

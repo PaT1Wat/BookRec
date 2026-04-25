@@ -68,8 +68,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const email = authUser.email || "";
     const now = new Date().toISOString();
 
-    const { error: userError } = await supabase.from("user").upsert(
-      {
+    const { data: existingUser, error: fetchUserError } = await supabase
+      .from("user")
+      .select("id, role")
+      .eq("id", authUser.id)
+      .maybeSingle();
+
+    if (fetchUserError) {
+      console.error("fetch public.user error:", fetchUserError);
+    }
+
+    if (existingUser) {
+      const { error: updateUserError } = await supabase
+        .from("user")
+        .update({
+          email,
+          userName: displayName,
+          display_name: displayName,
+          updated_at: now,
+        })
+        .eq("id", authUser.id);
+
+      if (updateUserError) {
+        console.error("update public.user error:", updateUserError);
+      }
+    } else {
+      const { error: insertUserError } = await supabase.from("user").insert({
         id: authUser.id,
         email,
         userName: displayName,
@@ -77,12 +101,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: "user",
         created_at: now,
         updated_at: now,
-      },
-      { onConflict: "id" }
-    );
+      });
 
-    if (userError) {
-      console.error("ensure public.user error:", userError);
+      if (insertUserError) {
+        console.error("insert public.user error:", insertUserError);
+      }
     }
 
     const { error: profileError } = await supabase.from("profiles").upsert(
@@ -103,30 +126,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (authUser: User) => {
       await ensureUserRows(authUser);
 
-      const [profileRes, userRes, genreRes] = await Promise.all([
+      const [profileRes, userRes, tagRes] = await Promise.all([
         supabase
           .from("profiles")
           .select("display_name, avatar_url")
           .eq("userID", authUser.id)
-          .single(),
-
-        supabase.from("user").select("role").eq("id", authUser.id).single(),
+          .maybeSingle(),
 
         supabase
-          .from("user_genres")
-          .select("type_id")
+          .from("user")
+          .select("role")
+          .eq("id", authUser.id)
+          .maybeSingle(),
+
+        supabase
+          .from("user_tags")
+          .select("tagID")
           .eq("user_id", authUser.id),
       ]);
-
-      // 🔥 debug ตรงนี้
-      console.log("user_genres:", genreRes.data, genreRes.error);
-
-      const hasGenres =
-        !genreRes.error &&
-        Array.isArray(genreRes.data) &&
-        genreRes.data.length > 0;
-
-      setNeedsGenreOnboarding(!hasGenres);
 
       if (profileRes.data) {
         setProfile(profileRes.data);
@@ -138,7 +155,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       setIsAdmin(userRes.data?.role === "admin");
-      
+
+      const hasTags =
+        !tagRes.error &&
+        Array.isArray(tagRes.data) &&
+        tagRes.data.length > 0;
+
+      setNeedsGenreOnboarding(!hasTags);
+
+      console.log("user_tags:", tagRes.data, tagRes.error);
+      console.log("role:", userRes.data?.role);
     },
     [ensureUserRows]
   );

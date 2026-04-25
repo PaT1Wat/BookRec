@@ -118,24 +118,26 @@ function mapRow(row: any): Book {
 const findOrCreateAuthor = async (
   authorName: string
 ): Promise<number | null> => {
-  if (!authorName.trim()) return null;
+  const name = authorName.trim();
+  if (!name) return null;
 
-  const { data: existing } = (await supabase
+  const { data: existing, error: findError } = (await supabase
     .from("author" as any)
     .select("authorID")
-    .eq("authorName", authorName.trim())
+    .ilike("authorName", name)
     .maybeSingle()) as any;
 
-  if (existing) return (existing as any).authorID;
+  if (findError) throw findError;
+  if (existing) return existing.authorID;
 
-  const { data: newAuthor, error } = (await supabase
+  const { data: newAuthor, error: insertError } = (await supabase
     .from("author" as any)
-    .insert({ authorName: authorName.trim() })
+    .insert({ authorName: name })
     .select("authorID")
     .single()) as any;
 
-  if (error) throw error;
-  return (newAuthor as any).authorID;
+  if (insertError) throw insertError;
+  return newAuthor.authorID;
 };
 
 /* =======================
@@ -144,24 +146,33 @@ const findOrCreateAuthor = async (
 const findOrCreatePublisher = async (
   publisherName: string
 ): Promise<number | null> => {
-  if (!publisherName.trim()) return null;
+  const name = publisherName.trim();
+  if (!name) return null;
 
-  const { data: existing } = (await supabase
+  const { data: existingList, error: findError } = (await supabase
     .from("publisher" as any)
     .select("publisherID")
-    .eq("publisherName", publisherName.trim())
-    .maybeSingle()) as any;
+    .ilike("publisherName", name)
+    .limit(1)) as any;
 
-  if (existing) return (existing as any).publisherID;
+  if (findError) throw findError;
 
-  const { data: newPub, error } = (await supabase
+  if (existingList && existingList.length > 0) {
+    return existingList[0].publisherID;
+  }
+
+  const { data: newPub, error: insertError } = (await supabase
     .from("publisher" as any)
-    .insert({ publisherName: publisherName.trim() })
+    .insert({
+      publisherName: name,
+      website: null,
+    })
     .select("publisherID")
     .single()) as any;
 
-  if (error) throw error;
-  return (newPub as any).publisherID;
+  if (insertError) throw insertError;
+
+  return newPub.publisherID;
 };
 
 /* =======================
