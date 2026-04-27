@@ -8,6 +8,10 @@ import { supabase } from "@/integrations/supabase/client";
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 const RECOMMEND_LIMIT = 12;
 
+const shuffleArray = (array: string[]) => {
+  return [...array].sort(() => Math.random() - 0.5);
+};
+
 // ✅ mapping ภาษาไทย → tagName ใน DB
 const GENRE_MAP: Record<string, string> = {
   "แฟนตาซี": "แฟนตาซี",
@@ -34,6 +38,8 @@ const Index = () => {
   const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
   const [preferredGenres, setPreferredGenres] = useState<string[]>([]);
 
+  const [recsLoading, setRecsLoading] = useState(true);
+  
   const dbGenre = selectedGenre ? GENRE_MAP[selectedGenre] : null;
 
   useEffect(() => {
@@ -109,101 +115,61 @@ const Index = () => {
 
   useEffect(() => {
     const fetchRecs = async () => {
-      if (books.length === 0) {
-        setRecommendedIds([]);
-        return;
-      }
-
       try {
-        setRecommendedIds([]);
+        setRecsLoading(true);
 
-        // guest → fallback popular ตามแนวที่เลือก
+        let resultIds: string[] = [];
+
+        if (books.length === 0) {
+          setRecommendedIds([]);
+          return;
+        }
+
         if (!user) {
-          const fallbackIds = getPreferredFallbackIds();
-          
-          console.log("[recs] guest fallback ids:", fallbackIds);
-          setRecommendedIds(fallbackIds);
-          return;
+          resultIds = getPreferredFallbackIds();
+        } else {
+          const [
+            { data: favs },
+            { data: revs },
+            { data: interactions },
+          ] = await Promise.all([
+            supabase.from("favorite").select("bookID").eq("user_id", user.id),
+            supabase.from("review").select("reviewID").eq("user_id", user.id),
+            supabase.from("interaction").select("interactionID").eq("user_id", user.id),
+          ]);
+
+          const hasInteraction =
+            (favs?.length ?? 0) > 0 ||
+            (revs?.length ?? 0) > 0 ||
+            (interactions?.length ?? 0) > 0;
+
+          if (!hasInteraction) {
+            resultIds = getPreferredFallbackIds();
+          } else {
+            const rgenreParam = dbGenre
+              ? `?genre=${encodeURIComponent(dbGenre)}`
+              : "";
+
+            const resp = await fetch(`${BACKEND_URL}/recommend/${user.id}${rgenreParam}`);
+
+            if (resp.ok) {
+              const json = await resp.json();
+              const ids = (json.bookIDs || []).map((id: unknown) => String(id));
+
+              resultIds = ids.length > 0 ? ids : getPreferredFallbackIds();
+            } else {
+              resultIds = getPreferredFallbackIds();
+            }
+          }
         }
 
-        const [
-          { data: favs, error: favErr },
-          { data: revs, error: revErr },
-          { data: interactions, error: intErr },
-        ] = await Promise.all([
-          supabase.from("favorite").select("favoriteID").eq("user_id", user.id),
-          supabase.from("review").select("reviewID").eq("user_id", user.id),
-          supabase.from("interaction").select("interactionID").eq("user_id", user.id),
-        ]);
-
-        if (favErr || revErr || intErr) {
-          console.error("[recs] Error checking interactions:", favErr || revErr || intErr);
-
-          const fallbackIds = getPreferredFallbackIds();
-
-          console.log("[recs] guest fallback ids:", fallbackIds);
-          setRecommendedIds(fallbackIds);
-          return;
-        }
-
-        const hasInteraction =
-          (favs?.length ?? 0) > 0 ||
-          (revs?.length ?? 0) > 0 ||
-          (interactions?.length ?? 0) > 0;
-
-        console.log("[recs] user:", user.id);
-        console.log("[recs] favorites count:", favs?.length ?? 0);
-        console.log("[recs] reviews count:", revs?.length ?? 0);
-        console.log("[recs] interaction count:", interactions?.length ?? 0);
-        console.log("[recs] hasInteraction:", hasInteraction);
-
-        if (!hasInteraction) {
-          const fallbackIds = getPreferredFallbackIds();
-
-          console.log("[recs] guest fallback ids:", fallbackIds);
-          setRecommendedIds(fallbackIds);
-          return;
-        }
-
-        const genreParam = dbGenre
-          ? `?genre=${encodeURIComponent(dbGenre)}`
-          : "";
-
-        const resp = await fetch(`${BACKEND_URL}/recommend/${user.id}${genreParam}`);
-
-        console.log("[recs] backend url:", `${BACKEND_URL}/recommend/${user.id}${genreParam}`);
-        console.log("[recs] backend response ok:", resp.ok);
-
-        if (!resp.ok) {
-          const fallbackIds = getPreferredFallbackIds();
-
-          console.log("[recs] guest fallback ids:", fallbackIds);
-          setRecommendedIds(fallbackIds);
-          return;
-        }
-
-        const json = await resp.json();
-        const ids = (json.bookIDs || []).map((id: unknown) => String(id));
-
-        console.log("[recs] backend ids:", ids);
-
-        if (ids.length === 0) {
-          const fallbackIds = getPreferredFallbackIds();
-
-          console.log("[recs] guest fallback ids:", fallbackIds);
-          setRecommendedIds(fallbackIds);
-          return;
-        }
-
-        setRecommendedIds(ids);
+        setRecommendedIds(shuffleArray(resultIds));
+        
       } catch (err) {
-        console.error("[recs] Failed to fetch recommendations:", err);
-
-        const fallbackIds = getPreferredFallbackIds();
-
-        console.log("[recs] guest fallback ids:", fallbackIds);
-        setRecommendedIds(fallbackIds);
-        return;
+        console.error(err);
+        setRecommendedIds(shuffleArray(getPreferredFallbackIds()));
+      } finally {
+        setRecsLoading(false);
       }
     };
 
@@ -211,7 +177,6 @@ const Index = () => {
   }, [user?.id, books, dbGenre, preferredGenres]);
 
   const recommendedBooks = useMemo(() => {
-    // 1. ถ้ามี backend แนะนำ → ใช้ก่อน
     const byBackend = recommendedIds
       .map((id) =>
         books.find((b) => {
@@ -219,53 +184,25 @@ const Index = () => {
           return candidateId === String(id);
         })
       )
-      .filter(Boolean) as typeof books;
+      .filter(Boolean);
 
-    // 🔥 ถ้ามีแนวที่ user เลือก → ใช้ก่อน
-  if (user && preferredGenres.length > 0) {
-    return [...books]
-      .map((book) => {
-        const bookGenres = book.genres ?? book.tags ?? [];
-        const score = bookGenres.filter((g: string) =>
-          preferredGenres.includes(g)
-        ).length;
-
-        return { book, score };
-      })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .map((item) => item.book)
-      .slice(0, RECOMMEND_LIMIT);
-  }
-
-  // 🔥 ค่อย fallback ไป backend
-  if (byBackend.length > 0) {
-    return byBackend.slice(0, RECOMMEND_LIMIT);
-  }
-
-    // 2. ใช้แนวจาก popup (user_tags)
-    if (user && preferredGenres.length > 0) {
-      return [...books]
-        .map((book) => {
-          const bookGenres = book.genres ?? book.tags ?? [];
-          const score = bookGenres.filter((g: string) =>
-            preferredGenres.includes(g)
-          ).length;
-
-          return { book, score };
-        })
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .map((item) => item.book)
-        .slice(0, RECOMMEND_LIMIT);
+    if (byBackend.length > 0) {
+      return byBackend.slice(0, RECOMMEND_LIMIT);
     }
 
-    // 3. fallback → popular
     return books
       .filter((b) => b.isPopular)
       .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
       .slice(0, RECOMMEND_LIMIT);
-  }, [recommendedIds, books, user, preferredGenres, dbGenre]);
+  }, [recommendedIds, books, dbGenre]);
+
+  const displayBooks = useMemo(() => {
+    if (selectedGenre && recsLoading) {
+      return filterByGenre(books).slice(0, RECOMMEND_LIMIT);
+  }
+
+    return recommendedBooks;
+  }, [selectedGenre, recsLoading, books, recommendedBooks, dbGenre]);
 
   console.log("[recs] selectedGenre:", selectedGenre);
   console.log("[recs] dbGenre:", dbGenre);
@@ -273,6 +210,26 @@ const Index = () => {
   console.log("[recs] recommendedBooks final:", recommendedBooks);
   console.log("[recs] sample book ids:", books.slice(0, 10).map((b) => (b as any).bookID ?? b.id));
   console.log("[recs] first book object:", books[0]);
+
+  const handleGenreClick = (genre: string | null) => {
+    const nextGenre = genre === selectedGenre ? null : genre;
+    const nextDbGenre = nextGenre ? GENRE_MAP[nextGenre] : null;
+
+    setSelectedGenre(nextGenre);
+    setRecsLoading(true);
+
+    const instantIds = books
+      .filter((book) => {
+        if (!nextDbGenre) return book.isPopular;
+
+        const genres = book.genres ?? book.tags ?? [];
+        return genres.includes(nextDbGenre);
+      })
+      .slice(0, RECOMMEND_LIMIT)
+      .map((book) => String((book as any).bookID ?? book.id));
+
+    setRecommendedIds(shuffleArray(instantIds));
+  };
 
   return (
     <div className="min-h-screen">
@@ -288,7 +245,7 @@ const Index = () => {
 
         <div className="flex flex-wrap gap-2 py-6">
           <button
-            onClick={() => setSelectedGenre(null)}
+            onClick={() => handleGenreClick(null)}
             className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
               !selectedGenre
                 ? "bg-primary text-primary-foreground border-primary"
@@ -301,7 +258,7 @@ const Index = () => {
           {GENRE_LABELS.map((g) => (
             <button
               key={g}
-              onClick={() => setSelectedGenre(selectedGenre === g ? null : g)}
+              onClick={() => handleGenreClick(g)}
               className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
                 selectedGenre === g
                   ? "bg-primary text-primary-foreground border-primary"
@@ -314,8 +271,15 @@ const Index = () => {
         </div>
 
         {/* ✅ แนะนำทั่วไป เมื่อไม่ได้เลือกแนว */}
-        {!selectedGenre &&
-          (recommendedBooks.length > 0 ? (
+        {!selectedGenre && (
+          recsLoading ? (
+            <section className="py-8">
+              <h2 className="text-xl font-bold">💡 สำหรับคุณ</h2>
+              <p className="text-sm text-muted-foreground">
+                กำลังวิเคราะห์หนังสือสำหรับคุณ...
+              </p>
+            </section>
+          ) : recommendedBooks.length > 0 ? (
             <BookSection
               title={user ? "💡 สำหรับคุณ" : "🔥 แนะนำเบื้องต้น"}
               subtitle={
@@ -327,24 +291,23 @@ const Index = () => {
             />
           ) : (
             <section className="py-8">
-              <div className="mb-4">
-                <h2 className="text-xl font-bold text-foreground font-display">
-                  {user ? "💡 สำหรับคุณ" : "🔥 แนะนำเบื้องต้น"}
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  ยังไม่มีข้อมูลแนะนำในตอนนี้
-                </p>
-              </div>
+              <h2 className="text-xl font-bold">
+                {user ? "💡 สำหรับคุณ" : "🔥 แนะนำเบื้องต้น"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                ยังไม่มีข้อมูลแนะนำในตอนนี้
+              </p>
             </section>
-          ))}
+          )
+        )}
 
         {/* ✅ แนะนำตามแนวจาก backend จริง */}
         {selectedGenre &&
-          (recommendedBooks.length > 0 ? (
+          (displayBooks.length > 0 ? (
             <BookSection
               title={`💡 แนะนำแนว${selectedGenre}`}
               subtitle={`หนังสือแนะนำในแนว ${selectedGenre} สำหรับคุณ`}
-              books={recommendedBooks}
+              books={displayBooks}
             />
           ) : (
             <section className="py-8">

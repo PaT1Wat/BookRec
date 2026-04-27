@@ -7,8 +7,12 @@ import { useFavorites } from "@/lib/favorites";
 import BookCard from "@/components/BookCard";
 
 const FavoritesPage = () => {
-  const { books = [], loading } = useBooks() as any;
-  const { favorites } = useFavorites();
+  const { books = [], loading: booksLoading } = useBooks() as any;
+
+  // ต้องให้ useFavorites return loading ด้วย
+  const { favorites, loading: favoritesLoading } = useFavorites() as any;
+
+  const loading = booksLoading || favoritesLoading;
 
   const favoriteBooks = useMemo(() => {
     const bookMap = new Map(
