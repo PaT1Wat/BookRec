@@ -1,6 +1,8 @@
 import os
 import pickle
 import traceback
+import random
+import hashlib
 from pathlib import Path
 from collections import defaultdict
 
@@ -172,17 +174,19 @@ def _get_interacted_book_ids_for_user(user_id: str, favs, reviews, interactions)
 def _interaction_weight(action_type: str) -> float:
     action = str(action_type or "").lower()
 
-    if action == "view":
-        return 0.4
-    if action == "favorite":
-        return 4.0
-    if action == "review":
-        return 3.5
+    weights = {
+        "favorite": 5.0,
+        "review": 4.5,
+        "rating": 4.0,
+        "search": 2.0,
+        "view": 0.8,
+        "click": 1.0,
+        "detail": 1.0,
+        "unfavorite": -2.0,
+        "review_delete": -2.0,
+    }
 
-    if action in {"unfavorite", "review_delete"}:
-        return 0.0
-
-    return 0.0
+    return weights.get(action, 0.0)
 
 
 def _clean_book_ids(values):
@@ -469,6 +473,66 @@ def _explore_fallback(n: int, books, favs, reviews, interactions, exclude=None, 
     scored.sort(key=lambda x: (-x[1], x[0]))
     return _clean_book_ids([bid for bid, _ in scored[:n]])
 
+def _book_tag_set(book_id, book_tags, tags):
+    tag_name_by_id = {
+        t.get("tagID"): t.get("tagName")
+        for t in tags
+    }
+
+    result = set()
+
+    for bt in book_tags:
+        if str(bt.get("bookID")) == str(book_id):
+            tag_name = tag_name_by_id.get(bt.get("tagID"))
+            if tag_name:
+                result.add(str(tag_name))
+
+    return result
+
+
+def _diversify_recommendations(scored_items, n, book_tags, tags, seed_key="default"):
+    if not scored_items:
+        return []
+
+    rng = random.Random(str(seed_key))
+    pool = scored_items[: max(n * 5, 40)]
+
+    noisy_pool = []
+    for bid, score in pool:
+        noise = rng.uniform(0, 0.8)
+        noisy_pool.append((str(bid), float(score) + noise))
+
+    noisy_pool.sort(key=lambda x: (-x[1], x[0]))
+
+    selected = []
+    selected_tags = set()
+
+    while noisy_pool and len(selected) < n:
+        best_item = None
+        best_value = -999999
+
+        for bid, score in noisy_pool:
+            tags_of_book = _book_tag_set(bid, book_tags, tags)
+
+            overlap = len(tags_of_book.intersection(selected_tags))
+            new_tags = len(tags_of_book - selected_tags)
+
+            final_score = score + (new_tags * 0.35) - (overlap * 1.25)
+
+            if final_score > best_value:
+                best_value = final_score
+                best_item = (bid, score, tags_of_book)
+
+        if best_item is None:
+            break
+
+        bid, _, tags_of_book = best_item
+        selected.append(bid)
+        selected_tags.update(tags_of_book)
+
+        noisy_pool = [item for item in noisy_pool if item[0] != bid]
+
+    return selected[:n]
 
 def _merge_hybrid_lists(primary, content, explore, n):
     final = []
@@ -835,8 +899,41 @@ def get_recommendations(user_id: str, n: int = 12, genre: str | None = None) -> 
     )
     print("[recommend] explore recommendations:", explore_ids)
 
-    final_ids = _merge_hybrid_lists(primary_ids, content_ids, explore_ids, n)
-    print("[recommend] final hybrid recommendations:", final_ids)
+    merged_ids = _merge_hybrid_lists(
+        primary_ids,
+        content_ids,
+        explore_ids,
+        max(n * 4, 40)
+    )
+    
+    activity = _build_item_activity(favs, reviews, interactions)
+
+    scored_for_diversity = []
+
+    for idx, bid in enumerate(merged_ids):
+        base_score = float(len(merged_ids) - idx)
+        activity_penalty = min(activity.get(str(bid), 0.0), 8.0) * 0.15
+        
+        scored_for_diversity.append(
+            (str(bid), base_score - activity_penalty)
+        )
+        
+    seed_key = f"{user_id}:{genre or 'all'}"
+    
+    final_ids = _diversify_recommendations(
+        scored_for_diversity,
+        n=n,
+        book_tags=book_tags,
+        tags=tags,
+        seed_key=seed_key,
+    )
+
+    print("[recommend] final diversified hybrid recommendations before filter:", final_ids)
+
+    # กันพลาด: ตัดหนังสือที่ user เคยกดใจ / รีวิว / interaction ออกอีกรอบ
+    final_ids = [bid for bid in final_ids if str(bid) not in interacted]
+
+    print("[recommend] final recommendations after removing interacted:", final_ids)
 
     if not genre:
         save_recommendations_to_supabase(user_id, final_ids, rec_type="hybrid")

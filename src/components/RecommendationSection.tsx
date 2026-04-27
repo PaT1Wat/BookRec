@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useBooks } from "@/context/BooksContext";
 import BookCard from "@/components/BookCard";
 import type { Book } from "@/data/books";
+import { useFavorites } from "@/lib/favorites";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 const TARGET_COUNT = 12;
@@ -17,9 +18,11 @@ type RecommendationRow = {
 export default function RecommendationSection() {
   const { user } = useAuth();
   const { books } = useBooks();
+  const { favorites } = useFavorites();
   const [recBooks, setRecBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
-
+  const favoriteSet = new Set((favorites ?? []).map(String));
+  
   useEffect(() => {
     async function fetchRecs() {
       const db = supabase as any;
@@ -105,29 +108,43 @@ export default function RecommendationSection() {
 
         const addId = (rawId: string | number | null | undefined) => {
           if (rawId === null || rawId === undefined) return;
+
           const key = String(rawId);
+          const book = bookMap.get(key);
+
+          if (!book) return;
+
+          const reactId = String(book.id);
+          const dbId = String(book.bookID ?? book.id);
+
+          // ❌ ถ้าเล่มนี้อยู่ใน favorite แล้ว ไม่เอามาแนะนำ
+          if (favoriteSet.has(key) || favoriteSet.has(reactId) || favoriteSet.has(dbId)) {
+            return;
+          }
+
+          // ❌ ถ้าเคยกดใจ → ไม่เอา
+          if (favoriteSet.has(key)) return;
           if (!seen.has(key)) {
             seen.add(key);
             mergedIds.push(key);
           }
         };
 
-        // priority 1: ผลจาก API
+        // priority 1: API (หลัก)
         for (const id of apiBookIds) {
           addId(id);
           if (mergedIds.length >= TARGET_COUNT) break;
         }
 
-        // priority 2: personalized hybrid recs
-        if (mergedIds.length < TARGET_COUNT) {
+        // ❌ ใช้ DB เฉพาะตอน API ว่างจริง ๆ เท่านั้น
+        if (mergedIds.length === 0) {
           for (const item of userRecs) {
             addId(item.bookID);
             if (mergedIds.length >= TARGET_COUNT) break;
           }
         }
-
-        // priority 3: general hybrid recs
-        if (mergedIds.length < TARGET_COUNT) {
+      
+        if (mergedIds.length === 0) {
           for (const item of generalRecs) {
             addId(item.bookID);
             if (mergedIds.length >= TARGET_COUNT) break;
@@ -154,7 +171,7 @@ export default function RecommendationSection() {
     if (books.length > 0) {
       fetchRecs();
     }
-  }, [user, books]);
+  }, [user, books, favorites]);
 
   if (loading || recBooks.length === 0) return null;
 
