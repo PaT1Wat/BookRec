@@ -34,13 +34,13 @@ const Index = () => {
   const { books = [], loading, rawPayload, lastError } = useBooks();
   const { user } = useAuth();
 
-  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
   const [preferredGenres, setPreferredGenres] = useState<string[]>([]);
 
   const [recsLoading, setRecsLoading] = useState(true);
   
-  const dbGenre = selectedGenre ? GENRE_MAP[selectedGenre] : null;
+  const dbGenres = selectedGenres.map((g) => GENRE_MAP[g]).filter(Boolean);
 
   useEffect(() => {
     if (!user) {
@@ -81,10 +81,15 @@ const Index = () => {
   }, [user?.id]);
 
   const filterByGenre = (list: typeof books) =>
-    dbGenre ? list.filter((b) => (b.genres ?? []).includes(dbGenre)) : list;
+    dbGenres.length > 0
+      ? list.filter((b) => {
+          const genres = b.genres ?? b.tags ?? [];
+          return dbGenres.every((g) => genres.includes(g));
+        })
+      : list;
 
   const getPreferredFallbackIds = () => {
-    const sourceGenres = dbGenre ? [dbGenre] : preferredGenres;
+    const sourceGenres = dbGenres.length > 0 ? dbGenres : preferredGenres;
 
     const matched = books
       .filter((b) => {
@@ -94,7 +99,7 @@ const Index = () => {
           return b.isPopular;
         }
 
-        return sourceGenres.some((g) => bookGenres.includes(g));
+        return sourceGenres.every((g) => bookGenres.includes(g));
       })
       .slice(0, RECOMMEND_LIMIT)
       .map((b) => String((b as any).bookID ?? b.id));
@@ -146,8 +151,8 @@ const Index = () => {
           if (!hasInteraction) {
             resultIds = getPreferredFallbackIds();
           } else {
-            const rgenreParam = dbGenre
-              ? `?genre=${encodeURIComponent(dbGenre)}`
+            const rgenreParam = dbGenres.length > 0
+              ? `?genre=${encodeURIComponent(dbGenres.join(","))}`
               : "";
 
             const resp = await fetch(`${BACKEND_URL}/recommend/${user.id}${rgenreParam}`);
@@ -174,7 +179,7 @@ const Index = () => {
     };
 
     fetchRecs();
-  }, [user?.id, books, dbGenre, preferredGenres]);
+  }, [user?.id, books, dbGenres.join(","), preferredGenres]);
 
   const recommendedBooks = useMemo(() => {
     const byBackend = recommendedIds
@@ -192,38 +197,56 @@ const Index = () => {
 
     return books
       .filter((b) => b.isPopular)
-      .filter((b) => (dbGenre ? (b.genres ?? []).includes(dbGenre) : true))
+      .filter((b) => (dbGenres.length > 0 ? dbGenres.every((g) => ((b.genres ?? b.tags ?? []) as string[]).includes(g)) : true))
       .slice(0, RECOMMEND_LIMIT);
-  }, [recommendedIds, books, dbGenre]);
+  }, [recommendedIds, books, dbGenres]);
 
   const displayBooks = useMemo(() => {
-    if (selectedGenre && recsLoading) {
+    if (selectedGenres.length > 0 && recsLoading) {
       return filterByGenre(books).slice(0, RECOMMEND_LIMIT);
   }
 
     return recommendedBooks;
-  }, [selectedGenre, recsLoading, books, recommendedBooks, dbGenre]);
+  }, [selectedGenres, recsLoading, books, recommendedBooks, dbGenres]);
 
-  console.log("[recs] selectedGenre:", selectedGenre);
-  console.log("[recs] dbGenre:", dbGenre);
+  console.log("[recs] selectedGenre:", selectedGenres);
+  console.log("[recs] dbGenre:", dbGenres);
   console.log("[recs] recommendedIds final:", recommendedIds);
   console.log("[recs] recommendedBooks final:", recommendedBooks);
   console.log("[recs] sample book ids:", books.slice(0, 10).map((b) => (b as any).bookID ?? b.id));
   console.log("[recs] first book object:", books[0]);
 
   const handleGenreClick = (genre: string | null) => {
-    const nextGenre = genre === selectedGenre ? null : genre;
-    const nextDbGenre = nextGenre ? GENRE_MAP[nextGenre] : null;
+    if (genre === null) {
+      setSelectedGenres([]);
+      setRecsLoading(true);
 
-    setSelectedGenre(nextGenre);
+      const instantIds = books
+        .filter((book) => book.isPopular)
+        .slice(0, RECOMMEND_LIMIT)
+        .map((book) => String((book as any).bookID ?? book.id));
+
+      setRecommendedIds(shuffleArray(instantIds));
+      return;
+    }
+
+    const nextGenres = selectedGenres.includes(genre)
+      ? selectedGenres.filter((g) => g !== genre)
+      : selectedGenres.length >= 3
+      ? selectedGenres
+      : [...selectedGenres, genre];
+
+    const nextDbGenres = nextGenres.map((g) => GENRE_MAP[g]).filter(Boolean);
+
+    setSelectedGenres(nextGenres);
     setRecsLoading(true);
 
     const instantIds = books
       .filter((book) => {
-        if (!nextDbGenre) return book.isPopular;
+        if (nextDbGenres.length === 0) return book.isPopular;
 
         const genres = book.genres ?? book.tags ?? [];
-        return genres.includes(nextDbGenre);
+        return nextDbGenres.every((g) => genres.includes(g));
       })
       .slice(0, RECOMMEND_LIMIT)
       .map((book) => String((book as any).bookID ?? book.id));
@@ -247,7 +270,7 @@ const Index = () => {
           <button
             onClick={() => handleGenreClick(null)}
             className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
-              !selectedGenre
+              selectedGenres.length === 0
                 ? "bg-primary text-primary-foreground border-primary"
                 : "border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
             }`}
@@ -260,7 +283,7 @@ const Index = () => {
               key={g}
               onClick={() => handleGenreClick(g)}
               className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
-                selectedGenre === g
+                selectedGenres.includes(g)
                   ? "bg-primary text-primary-foreground border-primary"
                   : "border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
               }`}
@@ -271,7 +294,7 @@ const Index = () => {
         </div>
 
         {/* ✅ แนะนำทั่วไป เมื่อไม่ได้เลือกแนว */}
-        {!selectedGenre && (
+        {selectedGenres.length === 0 && (
           recsLoading ? (
             <section className="py-8">
               <h2 className="text-xl font-bold">💡 สำหรับคุณ</h2>
@@ -302,18 +325,18 @@ const Index = () => {
         )}
 
         {/* ✅ แนะนำตามแนวจาก backend จริง */}
-        {selectedGenre &&
+        {selectedGenres.length > 0 &&
           (displayBooks.length > 0 ? (
             <BookSection
-              title={`💡 แนะนำแนว${selectedGenre}`}
-              subtitle={`หนังสือแนะนำในแนว ${selectedGenre} สำหรับคุณ`}
+              title={`💡 แนะนำแนว${selectedGenres.join(" & ")}`}
+              subtitle={`หนังสือแนะนำในแนว ${selectedGenres.join(" & ")  } สำหรับคุณ`}
               books={displayBooks}
             />
           ) : (
             <section className="py-8">
               <div className="mb-4">
                 <h2 className="text-xl font-bold text-foreground font-display">
-                  {`💡 แนะนำแนว${selectedGenre}`}
+                  {`💡 แนะนำแนว${selectedGenres.join(" & ")}`}
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   ยังไม่มีหนังสือแนะนำในแนวนี้ตอนนี้
@@ -322,7 +345,7 @@ const Index = () => {
             </section>
           ))}
 
-        {!selectedGenre && popularBooks.length > 0 && (
+        {selectedGenres.length === 0 && popularBooks.length > 0 && (
           <BookSection
             title="🔥 ยอดนิยม"
             subtitle="หนังสือที่ได้รับความนิยมสูงสุด"
@@ -330,7 +353,7 @@ const Index = () => {
           />
         )}
 
-        {!selectedGenre && newBooks.length > 0 && (
+        {selectedGenres.length === 0 && newBooks.length > 0 && (
           <BookSection
             title="✨ มาใหม่"
             subtitle="หนังสือที่เพิ่งเข้ามาใหม่ในระบบ"
@@ -354,12 +377,12 @@ const Index = () => {
           />
         )}
 
-        {selectedGenre &&
+        {selectedGenres.length > 0 &&
           mangaBooks.length === 0 &&
           novelBooks.length === 0 &&
           lightNovelBooks.length === 0 && (
             <div className="py-20 text-center text-muted-foreground">
-              ไม่พบหนังสือในแนว "{selectedGenre}"
+              ไม่พบหนังสือในแนว "{selectedGenres.join(", ")}"
             </div>
           )}
 

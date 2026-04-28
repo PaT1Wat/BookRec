@@ -8,7 +8,7 @@ import BookCard from "@/components/BookCard";
 // ✅ ตรงกับ tagName ใน DB แล้ว
 const GENRE_LIST = [
   "แอ็กชัน", "ผจญภัย", "แฟนตาซี", "โรแมนติก", "ดราม่า",
-  "คอมเมดี้", "สยองขวัญ", "สืบสวน", "ไซไฟ", "ชีวิตประจำวัน", "GL/BL",
+  "คอมเมดี้", "สยองขวัญ", "สืบสวน", "ไซไฟ", "ชีวิตประจำวัน", "BL ( Boy Love )", "GL ( Girl Love )",
 ];
 
 const TYPE_ID_MAP: Record<string, number> = {
@@ -109,9 +109,10 @@ const SearchPage = () => {
       }
 
       if (selectedGenres.length > 0) {
-        mapped = mapped.filter((b) =>
-          selectedGenres.some((g) => b.genres.includes(g))
-        );
+        mapped = mapped.filter((b) => {
+          const genres = b.genres ?? b.tags ?? [];
+          return selectedGenres.every((g) => genres.includes(g));
+        });
       }
 
       setBooks(mapped);
