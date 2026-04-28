@@ -23,6 +23,11 @@ type Review = {
 
 const BookDetailPage = () => {
   const { id } = useParams();
+
+  useEffect(() => {
+     window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [id]);
+
   const { books = [], refetch: refetchBooks, patchBook } = useBooks();
   const { toggle, check } = useFavorites();
   const { user } = useAuth();
@@ -322,8 +327,26 @@ const BookDetailPage = () => {
   const genres = book.genres ?? [];
   const tags = book.tags ?? [];
   const relatedBooks = books
-    .filter((b) => b.id !== book.id && (b.genres ?? []).some((g) => genres.includes(g)))
-    .slice(0, 4);
+    .filter((b) => String(b.id ?? b.bookID) !== String(book.id ?? book.bookID))
+    .map((b) => {
+      const currentTags = book.tags ?? book.genres ?? [];
+      const otherTags = b.tags ?? b.genres ?? [];
+
+      const matchCount = otherTags.filter((tag: string) =>
+        currentTags.includes(tag)
+      ).length;
+
+      return {
+        book: b,
+        matchCount,
+      };
+    })
+    // เอาเฉพาะเล่มที่แท็กตรงกัน 2 แท็กขึ้นไป
+    .filter((item) => item.matchCount >= 2)
+    // เรียงเล่มที่แท็กตรงเยอะสุดขึ้นก่อน
+    .sort((a, b) => b.matchCount - a.matchCount)
+    .map((item) => item.book)
+    .slice(0, 10);
 
   const avgRating = reviews.length
     ? reviews.reduce((sum, r) => sum + (r.rating ?? 0), 0) / reviews.length
@@ -602,9 +625,12 @@ const BookDetailPage = () => {
           <h2 className="mb-6 text-xl font-bold text-foreground font-display">
             📚 หนังสือที่คล้ายกัน
           </h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-            {relatedBooks.map((b) => (
-              <BookCard key={b.id} book={b} />
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {relatedBooks.slice(0, 10).map((b) => (
+              <div key={String(b.id ?? b.bookID)} className="scale-90 origin-top">
+                <BookCard book={b} />
+              </div>
             ))}
           </div>
         </section>

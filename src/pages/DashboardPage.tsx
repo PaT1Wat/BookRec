@@ -76,16 +76,21 @@ const DashboardPage = () => {
     books.forEach((b) => {
       // ใช้ทั้ง genres และ tags
       const allTags = [...(b.genres ?? []), ...(b.tags ?? [])];
-      const unique = [...new Set(allTags)];
+
+      const normalize = (t: string) =>
+        t.replace(/\s+/g, " ").trim();
+
+      const unique = [...new Set(allTags.map((t) => normalize(String(t))))];
+
       unique.forEach((g) => {
-        genreMap.set(g, (genreMap.get(g) || 0) + 1);
+        const key = normalize(g);
+        genreMap.set(key, (genreMap.get(g) || 0) + 1);
       });
     });
 
     return [...genreMap.entries()]
       .map(([genre, count]) => ({ genre, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10); // แสดงสูงสุด 10 แนว
+      .sort((a, b) => b.count - a.count);
   }, [books]);
 
   const maxGenreCount = genreCounts[0]?.count || 1;
