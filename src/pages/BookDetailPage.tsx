@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import BookCard from "@/components/BookCard";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect } from "react";
 
 type Review = {
   reviewID: number;
@@ -24,8 +24,10 @@ type Review = {
 const BookDetailPage = () => {
   const { id } = useParams();
 
-  useEffect(() => {
-     window.scrollTo({ top: 0, behavior: "smooth" });
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
   }, [id]);
 
   const { books = [], refetch: refetchBooks, patchBook } = useBooks();
