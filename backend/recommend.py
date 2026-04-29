@@ -14,6 +14,7 @@ from lightfm import LightFM
 from lightfm.data import Dataset
 from lightfm.evaluation import precision_at_k
 from supabase import create_client
+from functools import lru_cache
 
 # =============================================================
 # SUPABASE CONFIG
@@ -70,6 +71,11 @@ def _fetch_raw_data():
         "book_types": book_types,
         "interactions": interactions,
     }
+    
+@lru_cache(maxsize=1)
+def _fetch_raw_data_cached():
+    print("[recommend] using cached data")
+    return _fetch_raw_data()
 
 
 # =============================================================
@@ -856,7 +862,7 @@ def save_recommendations_to_supabase(user_id: str | None, book_ids: list[str], r
 def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = None) -> list[str]:
     print(f"[recommend] get_recommendations start for user={user_id}, genres={genres}")
 
-    raw = _fetch_raw_data()
+    raw = _fetch_raw_data_cached()
     favs = raw["favs"]
     reviews = raw["reviews"]
     books = raw["books"]
@@ -973,6 +979,18 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
     
     print("[recommend] collaborative recommendations:", collab_ids)
     
+    # ✅ กรอง collaborative ให้ตรง genres ด้วย
+    collab_ids = _filter_candidate_ids_by_genre(
+        collab_ids,
+        genres,
+        books,
+        tags,
+        book_types,
+        book_tags,
+    )
+    
+    print("[recommend] collaborative after genre filter:", collab_ids)
+    
     merged_ids = _merge_hybrid_lists(
         primary_ids,
         content_ids + collab_ids,   # 👈 รวมตรงนี้
@@ -992,7 +1010,8 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
             (str(bid), base_score - activity_penalty)
         )
         
-    seed_key = f"{user_id}:{','.join(genres) if genres else 'all'}"
+    import time
+    seed_key = f"{user_id}:{time.time()}"
     
     final_ids = _diversify_recommendations(
         scored_for_diversity,
@@ -1023,7 +1042,7 @@ def compute_all_recommendations(n: int = 12):
     print("[recommend] Starting full recommendation compute...")
 
     try:
-        raw = _fetch_raw_data()
+        raw = _fetch_raw_data_cached()
         print(
             "[recommend] raw counts:",
             {

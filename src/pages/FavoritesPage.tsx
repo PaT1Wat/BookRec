@@ -15,12 +15,25 @@ const FavoritesPage = () => {
   const loading = booksLoading || favoritesLoading;
 
   const favoriteBooks = useMemo(() => {
-    const bookMap = new Map(
-      books.map((b: any) => [String(b.id ?? b.bookID), b])
+    const bookMap = new Map<string, any>();
+
+      books.forEach((b: any) => {
+        const key = String(b.bookID ?? b.id);
+        if (!bookMap.has(key)) {
+          bookMap.set(key, b);
+        }
+      });
+ 
+      const uniqueFavoriteIds = Array.from(
+      new Set(
+        (favorites || [])
+          .map((id: string | number) => String(id))
+          .filter(Boolean)
+      )
     );
 
-    return favorites
-      .map((id: string | number) => bookMap.get(String(id)))
+    return uniqueFavoriteIds
+      .map((id) => bookMap.get(id))
       .filter(Boolean);
   }, [books, favorites]);
 
@@ -72,7 +85,7 @@ const FavoritesPage = () => {
       {favoriteBooks.length > 0 ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {favoriteBooks.map((book: any) => (
-            <BookCard key={String(book.id ?? book.bookID)} book={book} />
+            <BookCard key={String(book.bookID ?? book.id)} book={book} />
           ))}
         </div>
       ) : (
