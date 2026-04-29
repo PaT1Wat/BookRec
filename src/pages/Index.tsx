@@ -112,7 +112,17 @@ const Index = () => {
       .map((b) => String((b as any).bookID ?? b.id));
   };
 
-  const popularBooks = filterByGenre(books.filter((b) => b.isPopular));
+  const popularBooks = filterByGenre(
+    [...books]
+      .filter((b) => b.isPopular)
+      .sort((a, b) => {
+        const reviewDiff = (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+
+        if (reviewDiff !== 0) return reviewDiff;
+
+        return (b.rating ?? 0) - (a.rating ?? 0);
+      })
+  );
   const newBooks = filterByGenre(books.filter((b) => b.isNew));
   const mangaBooks = filterByGenre(books.filter((b) => b.type === "manga")).slice(0, 6);
   const novelBooks = filterByGenre(books.filter((b) => b.type === "novel")).slice(0, 6);
