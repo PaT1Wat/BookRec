@@ -14,7 +14,7 @@ import { BooksProvider } from "@/context/BooksContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 import Navbar from "@/components/Navbar";
-import AIChatButton from "@/components/AIChatButton";
+
 import GenreOnboardingGate from "./components/GenreOnboardingGate"; // 🔥 เพิ่ม
 
 import Index from "./pages/Index";
@@ -117,8 +117,7 @@ function AppContent() {
         <Route path="*" element={<NotFound />} />
       </Routes>
 
-      {/* Floating AI */}
-      <AIChatButton />
+      
     </>
   );
 }
