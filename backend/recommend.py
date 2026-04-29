@@ -243,17 +243,17 @@ def _build_item_activity(favs, reviews, interactions):
     return activity
 
 
-def _book_matches_genre(bid, genre, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id):
-    if not genre:
+def _book_matches_genres(bid, genres, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id):
+    if not genres:
         return True
 
-    norm_genre = _normalize_text(genre)
-    if not norm_genre:
+    norm_genres = {_normalize_text(g) for g in genres}
+    if not norm_genres:
         return True
 
     bid = str(bid)
     tags = {_normalize_text(t) for t in book_tag_names.get(bid, set())}
-    if norm_genre in tags:
+    if norm_genres.issubset(tags):        
         return True
 
     book = book_by_id.get(bid)
@@ -264,11 +264,11 @@ def _book_matches_genre(bid, genre, book_by_id, book_tag_names, type_slug_by_id,
     type_slug = _normalize_text(type_slug_by_id.get(t_id))
     type_name = _normalize_text(type_name_by_id.get(t_id))
 
-    return norm_genre in {type_slug, type_name}
+    return any(norm_genre in {type_slug, type_name} for norm_genre in norm_genres)
 
 
-def _filter_candidate_ids_by_genre(candidate_ids, genre, books, tags, book_types, book_tags):
-    if not genre:
+def _filter_candidate_ids_by_genre(candidate_ids, genres, books, tags, book_types, book_tags):
+    if not genres:
         return _clean_book_ids(candidate_ids)
 
     book_by_id, _, type_slug_by_id, type_name_by_id, book_tag_names = _build_book_maps(
@@ -277,7 +277,7 @@ def _filter_candidate_ids_by_genre(candidate_ids, genre, books, tags, book_types
 
     filtered = []
     for bid in candidate_ids:
-        if _book_matches_genre(bid, genre, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id):
+        if _book_matches_genres(bid, genres, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id):
             filtered.append(str(bid))
 
     return _clean_book_ids(filtered)
@@ -314,6 +314,51 @@ def _popularity_fallback(n: int, favs, reviews, interactions, exclude=None):
     return _clean_book_ids(ranked[:n])
 
 
+def _collaborative_fallback(user_id, favs, reviews, interactions, n=20):
+    user_books = set()
+
+    # หนังสือที่ user คนนี้เคยมี interaction
+    for f in favs:
+        if str(f.get("user_id")) == str(user_id):
+            user_books.add(str(f.get("bookID")))
+
+    for r in reviews:
+        if str(r.get("user_id")) == str(user_id):
+            user_books.add(str(r.get("bookID")))
+
+    for it in interactions:
+        if str(it.get("user_id")) == str(user_id):
+            user_books.add(str(it.get("bookID")))
+
+    # หา user ที่ "คล้ายกัน"
+    similar_users = defaultdict(int)
+
+    for f in favs:
+        bid = str(f.get("bookID"))
+        uid = str(f.get("user_id"))
+
+        if bid in user_books and uid != str(user_id):
+            similar_users[uid] += 1
+
+    # เรียง user ที่คล้ายมากสุด
+    similar_users = sorted(similar_users.items(), key=lambda x: -x[1])[:30]
+
+    candidate_books = defaultdict(int)
+
+    # เอาหนังที่ user คล้ายกันชอบมา
+    for uid, score in similar_users:
+        for f in favs:
+            if str(f.get("user_id")) == uid:
+                bid = str(f.get("bookID"))
+
+                if bid not in user_books:
+                    candidate_books[bid] += score * 2
+
+    ranked = sorted(candidate_books.items(), key=lambda x: -x[1])
+
+    return [bid for bid, _ in ranked[:n]]
+
+
 def _content_profile_fallback(
     user_id: str,
     n: int,
@@ -324,16 +369,18 @@ def _content_profile_fallback(
     book_tags,
     tags,
     book_types,
-    genre: str | None = None,
+    genres: list[str] | None = None,
 ):
     interacted = _get_interacted_book_ids_for_user(user_id, favs, reviews, interactions)
     preferred_tag_ids = _get_user_preferred_tag_ids(user_id)
+
     if not books:
         return []
 
     book_by_id, _, type_slug_by_id, type_name_by_id, book_tag_names = _build_book_maps(
         books, tags, book_types, book_tags
     )
+
     item_activity = _build_item_activity(favs, reviews, interactions)
 
     preferred_tags = defaultdict(float)
@@ -356,6 +403,7 @@ def _content_profile_fallback(
         if str(r.get("user_id")) == str(user_id):
             bid = str(r.get("bookID") or r.get("book_id") or r.get("bookId") or "")
             rating = float(r.get("rating") or 0)
+
             if bid:
                 for tag in book_tag_names.get(bid, set()):
                     preferred_tags[tag] += max(1.0, rating)
@@ -370,6 +418,7 @@ def _content_profile_fallback(
         if str(it.get("user_id")) == str(user_id):
             bid = str(it.get("bookID") or it.get("book_id") or it.get("bookId") or "")
             w = _interaction_weight(it.get("actionType"))
+
             if not bid or w <= 0:
                 continue
 
@@ -386,22 +435,23 @@ def _content_profile_fallback(
 
     for b in books:
         bid = str(b.get("bookID"))
+
         if bid in interacted:
             continue
 
-        if genre and not _book_matches_genre(
-            bid, genre, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id
+        if genres and not _book_matches_genres(
+            bid, genres, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id
         ):
             continue
 
         score = 0.0
-        
+
         book_tag_ids = {
             int(bt.get("tagID"))
             for bt in book_tags
             if str(bt.get("bookID")) == bid and bt.get("tagID") is not None
         }
-        
+
         matched_user_tags = preferred_tag_ids.intersection(book_tag_ids)
 
         if matched_user_tags:
@@ -426,7 +476,7 @@ def _content_profile_fallback(
         elif activity < 2:
             score += 1.0
 
-        if genre:
+        if genres:
             score += 2.0
 
         if score > 0:
@@ -436,7 +486,18 @@ def _content_profile_fallback(
     return _clean_book_ids([bid for bid, _ in scored_books[:n]])
 
 
-def _explore_fallback(n: int, books, favs, reviews, interactions, exclude=None, genre: str | None = None, tags=None, book_types=None, book_tags=None):
+def _explore_fallback(
+    n: int,
+    books,
+    favs,
+    reviews,
+    interactions,
+    exclude=None,
+    genres: list[str] | None = None,
+    tags=None,
+    book_types=None,
+    book_tags=None,
+):
     exclude = exclude or set()
     activity = _build_item_activity(favs, reviews, interactions)
 
@@ -445,13 +506,15 @@ def _explore_fallback(n: int, books, favs, reviews, interactions, exclude=None, 
     )
 
     scored = []
+
     for b in books:
         bid = str(b.get("bookID"))
+
         if bid in exclude:
             continue
 
-        if genre and not _book_matches_genre(
-            bid, genre, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id
+        if genres and not _book_matches_genres(
+            bid, genres, book_by_id, book_tag_names, type_slug_by_id, type_name_by_id
         ):
             continue
 
@@ -465,7 +528,7 @@ def _explore_fallback(n: int, books, favs, reviews, interactions, exclude=None, 
         if bool(b.get("is_popular")):
             score += 0.5
 
-        if genre:
+        if genres:
             score += 1.5
 
         scored.append((bid, score))
@@ -790,8 +853,8 @@ def save_recommendations_to_supabase(user_id: str | None, book_ids: list[str], r
 # GET RECOMMENDATIONS (HYBRID + OPTIONAL GENRE)
 # =============================================================
 
-def get_recommendations(user_id: str, n: int = 12, genre: str | None = None) -> list[str]:
-    print(f"[recommend] get_recommendations start for user={user_id}, genre={genre}")
+def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = None) -> list[str]:
+    print(f"[recommend] get_recommendations start for user={user_id}, genres={genres}")
 
     raw = _fetch_raw_data()
     favs = raw["favs"]
@@ -866,7 +929,7 @@ def get_recommendations(user_id: str, n: int = 12, genre: str | None = None) -> 
             print("[recommend] popularity primary fallback:", primary_ids)
 
     primary_ids = _filter_candidate_ids_by_genre(
-        primary_ids, genre, books, tags, book_types, book_tags
+        primary_ids, genres, books, tags, book_types, book_tags
     )
     print("[recommend] primary after genre filter:", primary_ids)
 
@@ -880,7 +943,7 @@ def get_recommendations(user_id: str, n: int = 12, genre: str | None = None) -> 
         book_tags=book_tags,
         tags=tags,
         book_types=book_types,
-        genre=genre,
+        genres=genres,
     )
     print("[recommend] content recommendations:", content_ids)
 
@@ -892,16 +955,27 @@ def get_recommendations(user_id: str, n: int = 12, genre: str | None = None) -> 
         reviews=reviews,
         interactions=interactions,
         exclude=exclude_for_explore,
-        genre=genre,
+        genres=genres,
         tags=tags,
         book_types=book_types,
         book_tags=book_tags,
     )
     print("[recommend] explore recommendations:", explore_ids)
 
+    # 🔥 เพิ่ม collaborative
+    collab_ids = _collaborative_fallback(
+        user_id,
+        favs,
+        reviews,
+        interactions,
+        n=max(n * 2, 24)
+    )
+    
+    print("[recommend] collaborative recommendations:", collab_ids)
+    
     merged_ids = _merge_hybrid_lists(
         primary_ids,
-        content_ids,
+        content_ids + collab_ids,   # 👈 รวมตรงนี้
         explore_ids,
         max(n * 4, 40)
     )
@@ -918,7 +992,7 @@ def get_recommendations(user_id: str, n: int = 12, genre: str | None = None) -> 
             (str(bid), base_score - activity_penalty)
         )
         
-    seed_key = f"{user_id}:{genre or 'all'}"
+    seed_key = f"{user_id}:{','.join(genres) if genres else 'all'}"
     
     final_ids = _diversify_recommendations(
         scored_for_diversity,
@@ -935,7 +1009,7 @@ def get_recommendations(user_id: str, n: int = 12, genre: str | None = None) -> 
 
     print("[recommend] final recommendations after removing interacted:", final_ids)
 
-    if not genre:
+    if not genres:
         save_recommendations_to_supabase(user_id, final_ids, rec_type="hybrid")
 
     return final_ids
@@ -991,7 +1065,7 @@ def compute_all_recommendations(n: int = 12):
 
         for uid in sorted(user_ids):
             print(f"[recommend] computing for user: {uid}")
-            recs = get_recommendations(uid, n=n, genre=None)
+            recs = get_recommendations(uid, n=n, genres=None)
             print(f"[recommend] recs for {uid}: {recs}")
 
         general_primary = _popularity_fallback(
@@ -1011,7 +1085,7 @@ def compute_all_recommendations(n: int = 12):
             book_tags=book_tags,
             tags=tags,
             book_types=book_types,
-            genre=None,
+            genres=None,
         )
 
         general_explore = _explore_fallback(
@@ -1021,7 +1095,7 @@ def compute_all_recommendations(n: int = 12):
             reviews=reviews,
             interactions=interactions,
             exclude=set(general_primary),
-            genre=None,
+            genres=None,
             tags=tags,
             book_types=book_types,
             book_tags=book_tags,
