@@ -4,6 +4,7 @@ import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { useFavorites } from "@/lib/favorites";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 const RECOMMEND_LIMIT = 12;
@@ -33,6 +34,12 @@ const GENRE_LABELS = Object.keys(GENRE_MAP);
 const Index = () => {
   const { books = [], loading, rawPayload, lastError } = useBooks();
   const { user } = useAuth();
+
+  const { favorites = [] } = useFavorites() as any;
+
+  const favoriteSet = useMemo(() => {
+    return new Set((favorites || []).map((id: any) => String(id)));
+  }, [favorites]);
 
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
@@ -108,6 +115,7 @@ const Index = () => {
 
    return books
       .filter((b) => b.isPopular)
+      .filter((b) => !favoriteSet.has(String((b as any).bookID ?? b.id)))
       .slice(0, RECOMMEND_LIMIT)
       .map((b) => String((b as any).bookID ?? b.id));
   };
@@ -202,18 +210,23 @@ const Index = () => {
       .filter(Boolean);
 
     if (byBackend.length > 0) {
-      return byBackend.slice(0, RECOMMEND_LIMIT);
+      return byBackend
+      .filter((book: any) => !favoriteSet.has(String(book.bookID ?? book.id)))
+      .slice(0, RECOMMEND_LIMIT);
     }
 
     return books
       .filter((b) => b.isPopular)
+      .filter((b) => !favoriteSet.has(String((b as any).bookID ?? b.id)))
       .filter((b) => (dbGenres.length > 0 ? dbGenres.every((g) => ((b.genres ?? b.tags ?? []) as string[]).includes(g)) : true))
       .slice(0, RECOMMEND_LIMIT);
-  }, [recommendedIds, books, dbGenres]);
+  }, [recommendedIds, books, dbGenres, favoriteSet]);
 
   const displayBooks = useMemo(() => {
     if (selectedGenres.length > 0 && recsLoading) {
-      return filterByGenre(books).slice(0, RECOMMEND_LIMIT);
+      return filterByGenre(books)
+        .filter((b) => !favoriteSet.has(String((b as any).bookID ?? b.id)))
+        .slice(0, RECOMMEND_LIMIT);
   }
 
     return recommendedBooks;
@@ -233,6 +246,7 @@ const Index = () => {
 
       const instantIds = books
         .filter((book) => book.isPopular)
+        .filter((book) => !favoriteSet.has(String((book as any).bookID ?? book.id)))
         .slice(0, RECOMMEND_LIMIT)
         .map((book) => String((book as any).bookID ?? book.id));
 
@@ -253,11 +267,14 @@ const Index = () => {
 
     const instantIds = books
       .filter((book) => {
+        
         if (nextDbGenres.length === 0) return book.isPopular;
 
         const genres = book.genres ?? book.tags ?? [];
         return nextDbGenres.every((g) => genres.includes(g));
       })
+      .filter((book) => !favoriteSet.has(String((book as any).bookID ?? book.id)))
+
       .slice(0, RECOMMEND_LIMIT)
       .map((book) => String((book as any).bookID ?? book.id));
 
