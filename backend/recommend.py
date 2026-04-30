@@ -876,7 +876,6 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
     primary_ids = []
 
     if DEBUG_SKIP_LIGHTFM:
-        print("[recommend] DEBUG_SKIP_LIGHTFM=true -> using popularity as primary")
         primary_ids = _popularity_fallback(
             n=max(n * 2, 24),
             favs=favs,
@@ -895,34 +894,33 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
             dataset = obj["dataset"]
             item_feature_tuples = obj["item_feature_tuples"]
 
-            mapping_result = dataset.mapping()
-            user_map = mapping_result[0]
-            item_map = mapping_result[1]
+            user_map, item_map, *_ = dataset.mapping()
             uid = user_map.get(str(user_id))
-
-            print("[recommend] user in model:", uid is not None)
-            print("[recommend] interacted count:", len(interacted))
 
             if uid is not None:
                 n_items = len(item_map)
                 item_features_matrix = dataset.build_item_features(item_feature_tuples)
-                scores = model.predict(uid, np.arange(n_items), item_features=item_features_matrix)
+                scores = model.predict(
+                    uid,
+                    np.arange(n_items),
+                    item_features=item_features_matrix,
+                )
 
                 inv_item_map = {v: k for k, v in item_map.items()}
-                ranked_internal = np.argsort(-scores)
 
-                for internal_id in ranked_internal:
+                for internal_id in np.argsort(-scores):
                     bid = inv_item_map.get(int(internal_id))
                     if bid is None:
                         continue
                     if str(bid) in interacted:
                         continue
+
                     primary_ids.append(str(bid))
+
                     if len(primary_ids) >= max(n * 3, 36):
                         break
 
                 primary_ids = _clean_book_ids(primary_ids)
-                print("[recommend] model primary recommendations:", primary_ids)
 
         if not primary_ids:
             primary_ids = _popularity_fallback(
@@ -932,16 +930,19 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
                 interactions=interactions,
                 exclude=interacted,
             )
-            print("[recommend] popularity primary fallback:", primary_ids)
 
     primary_ids = _filter_candidate_ids_by_genre(
-        primary_ids, genres, books, tags, book_types, book_tags
+        primary_ids,
+        genres,
+        books,
+        tags,
+        book_types,
+        book_tags,
     )
-    print("[recommend] primary after genre filter:", primary_ids)
 
     content_ids = _content_profile_fallback(
         user_id=user_id,
-        n=max(n * 2, 24),
+        n=max(n * 3, 36),
         books=books,
         favs=favs,
         reviews=reviews,
@@ -951,9 +952,26 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
         book_types=book_types,
         genres=genres,
     )
-    print("[recommend] content recommendations:", content_ids)
 
-    exclude_for_explore = set(interacted) | set(primary_ids) | set(content_ids)
+    collab_ids = _collaborative_fallback(
+        user_id,
+        favs,
+        reviews,
+        interactions,
+        n=max(n * 2, 24),
+    )
+
+    collab_ids = _filter_candidate_ids_by_genre(
+        collab_ids,
+        genres,
+        books,
+        tags,
+        book_types,
+        book_tags,
+    )
+
+    exclude_for_explore = set(interacted) | set(primary_ids) | set(content_ids) | set(collab_ids)
+
     explore_ids = _explore_fallback(
         n=max(n * 2, 24),
         books=books,
@@ -966,53 +984,40 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
         book_types=book_types,
         book_tags=book_tags,
     )
-    print("[recommend] explore recommendations:", explore_ids)
 
-    # 🔥 เพิ่ม collaborative
-    collab_ids = _collaborative_fallback(
-        user_id,
-        favs,
-        reviews,
-        interactions,
-        n=max(n * 2, 24)
-    )
-    
-    print("[recommend] collaborative recommendations:", collab_ids)
-    
-    # ✅ กรอง collaborative ให้ตรง genres ด้วย
-    collab_ids = _filter_candidate_ids_by_genre(
-        collab_ids,
-        genres,
-        books,
-        tags,
-        book_types,
-        book_tags,
-    )
-    
-    print("[recommend] collaborative after genre filter:", collab_ids)
-    
-    merged_ids = _merge_hybrid_lists(
-        primary_ids,
-        content_ids + collab_ids,   # 👈 รวมตรงนี้
-        explore_ids,
-        max(n * 4, 40)
-    )
-    
+    # ✅ จุดสำคัญ:
+    # ถ้ามี genres = ผู้ใช้ตั้งใจเลือกแนว → บังคับให้ตรงแนวมากขึ้น
+    if genres:
+        print("[recommend] STRICT GENRE MODE")
+        merged_ids = _clean_book_ids(
+            content_ids + collab_ids + primary_ids + explore_ids
+        )
+    else:
+        merged_ids = _merge_hybrid_lists(
+            primary_ids,
+            content_ids + collab_ids,
+            explore_ids,
+            max(n * 4, 40),
+        )
+
     activity = _build_item_activity(favs, reviews, interactions)
 
     scored_for_diversity = []
 
     for idx, bid in enumerate(merged_ids):
+        if str(bid) in interacted:
+            continue
+
         base_score = float(len(merged_ids) - idx)
         activity_penalty = min(activity.get(str(bid), 0.0), 8.0) * 0.15
-        
+
         scored_for_diversity.append(
             (str(bid), base_score - activity_penalty)
         )
-        
+
     import time
-    seed_key = f"{user_id}:{time.time()}"
-    
+    seed_key = f"{user_id}:{','.join(genres) if genres else 'all'}:{time.time()}"
+
     final_ids = _diversify_recommendations(
         scored_for_diversity,
         n=n,
@@ -1021,18 +1026,14 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
         seed_key=seed_key,
     )
 
-    print("[recommend] final diversified hybrid recommendations before filter:", final_ids)
-
-    # กันพลาด: ตัดหนังสือที่ user เคยกดใจ / รีวิว / interaction ออกอีกรอบ
     final_ids = [bid for bid in final_ids if str(bid) not in interacted]
 
-    print("[recommend] final recommendations after removing interacted:", final_ids)
+    print("[recommend] final recommendations:", final_ids)
 
     if not genres:
         save_recommendations_to_supabase(user_id, final_ids, rec_type="hybrid")
 
     return final_ids
-
 
 # =============================================================
 # COMPUTE ALL USERS + GENERAL HYBRID
