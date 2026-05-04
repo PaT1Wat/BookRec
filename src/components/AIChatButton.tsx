@@ -75,11 +75,13 @@ export default function AIChatButton() {
     setLoading(true);
 
     try {
-      const booksContext = books.slice(0, 50).map((b) => ({
+      const booksContext = books.map((b: any) => ({
+        id: b.id ?? b.bookID,
         title: b.title,
         titleEn: b.titleEn,
         type: b.type,
-        tags: b.tags?.slice(0, 5),
+        tags: b.tags ?? [],
+        description: b.description ?? "",
         author: b.authorName || b.author,
       }));
 
