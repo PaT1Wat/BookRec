@@ -132,9 +132,9 @@ const Index = () => {
       })
   );
   const newBooks = filterByGenre(books.filter((b) => b.isNew));
-  const mangaBooks = filterByGenre(books.filter((b) => b.type === "manga")).slice(0, 6);
-  const novelBooks = filterByGenre(books.filter((b) => b.type === "novel")).slice(0, 6);
-  const lightNovelBooks = filterByGenre(books.filter((b) => b.type === "light-novel")).slice(0, 6);
+  const mangaBooks = filterByGenre(books.filter((b) => b.type === "manga")).slice(0, 12);
+  const novelBooks = filterByGenre(books.filter((b) => b.type === "novel")).slice(0, 12);
+  const lightNovelBooks = filterByGenre(books.filter((b) => b.type === "light-novel")).slice(0, 12);
 
   useEffect(() => {
     const fetchRecs = async () => {

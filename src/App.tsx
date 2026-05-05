@@ -27,6 +27,7 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import ProfilePage from "./pages/ProfilePage";
 import DashboardPage from "./pages/DashboardPage";
 import NotFound from "./pages/NotFound";
+import AIChatButton from "./components/AIChatButton";
 
 /* =======================
    🔥 React Query
@@ -117,7 +118,7 @@ function AppContent() {
         <Route path="*" element={<NotFound />} />
       </Routes>
 
-      
+      <AIChatButton />
     </>
   );
 }

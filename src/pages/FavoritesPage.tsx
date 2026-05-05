@@ -13,63 +13,23 @@ const FavoritesPage = () => {
   const loading = booksLoading || favoritesLoading;
 
   const favoriteBooks = useMemo(() => {
-    // ✅ map หนังสือด้วย bookID ก่อน
-    const bookMap = new Map<string, any>();
-
-    books.forEach((b: any) => {
-      const key = String(b.bookID ?? b.id);
-      if (!bookMap.has(key)) {
-        bookMap.set(key, b);
-      }
-    });
-
-    // ✅ กัน favorite ซ้ำ
-    const uniqueFavoriteIds = Array.from(
-      new Set(
-        (favorites || [])
-          .map((id: string | number) => String(id))
-          .filter(Boolean)
-      )
+    const bookMap = new Map(
+      books.map((book: any) => [String(book.bookID ?? book.id), book])
     );
 
-    // ✅ map เป็น object หนังสือ
-    return uniqueFavoriteIds
-      .map((id) => bookMap.get(String(id)))
-      .filter(Boolean);
+    const uniqueIds = [...new Set(favorites.map((id: any) => String(id)))];
+
+    return uniqueIds.map((id) => bookMap.get(id)).filter(Boolean);
   }, [books, favorites]);
 
-  // =======================
-  // ⏳ Loading
-  // =======================
   if (loading) {
     return (
       <div className="container py-8">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary">
-            <Heart className="h-5 w-5 text-primary-foreground" />
-          </div>
-
-          <div>
-            <h1 className="text-2xl font-bold">ชั้นหนังสือของฉัน</h1>
-            <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-[320px] rounded-2xl border bg-card animate-pulse"
-            />
-          ))}
-        </div>
+        <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
       </div>
     );
   }
 
-  // =======================
-  // 🎯 Main UI
-  // =======================
   return (
     <div className="container py-8">
       <div className="mb-8 flex items-center gap-3">
@@ -88,10 +48,7 @@ const FavoritesPage = () => {
       {favoriteBooks.length > 0 ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {favoriteBooks.map((book: any) => (
-            <BookCard
-              key={String(book.bookID ?? book.id)}
-              book={book}
-            />
+            <BookCard key={String(book.bookID ?? book.id)} book={book} />
           ))}
         </div>
       ) : (
@@ -100,10 +57,6 @@ const FavoritesPage = () => {
 
           <p className="text-lg font-medium text-muted-foreground">
             ยังไม่มีหนังสือในชั้น
-          </p>
-
-          <p className="mt-1 text-sm text-muted-foreground">
-            กด ❤️ เพื่อเพิ่มหนังสือในชั้นของคุณ
           </p>
 
           <Link
