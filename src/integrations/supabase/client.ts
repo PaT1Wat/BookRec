@@ -4,7 +4,7 @@ import type { Database } from "./types";
 const SUPABASE_URL = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const SUPABASE_ANON_KEY = String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
 // 🔥 กันพัง + debug ง่าย
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   throw new Error("❌ Missing Supabase environment variables");
 }
 
@@ -13,7 +13,7 @@ console.debug("Supabase URL:", SUPABASE_URL);
 
 export const supabase = createClient<Database>(
   SUPABASE_URL,
-  SUPABASE_PUBLISHABLE_KEY,
+  SUPABASE_ANON_KEY,
   {
     auth: {
       storage: localStorage,
