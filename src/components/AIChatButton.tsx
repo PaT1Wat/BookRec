@@ -1,78 +1,67 @@
-import { useState, useRef, useEffect } from "react";
-import { MessageCircle, X, Send, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, MessageCircle, Send, X } from "lucide-react";
 import { useBooks } from "@/context/BooksContext";
 import BookCard from "@/components/BookCard";
 import type { Book } from "@/data/books";
 
-interface ChatRecommendation {
-  title: string;
-  reason?: string;
-}
-
-interface Message {
+type Message = {
   role: "user" | "bot";
   content: string;
-  recommendedBooks?: Array<{
-    book: Book;
-    reason?: string;
-  }>;
-}
+  recommendedBooks?: { book: Book; reason?: string }[];
+};
+
+type ChatRecommendation = {
+  title: string;
+  reason?: string;
+};
 
 export default function AIChatButton() {
+  const { books } = useBooks();
+
   const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "bot",
       content: "สวัสดีครับ! ผม BookBot 📚 ถามเรื่องหนังสือได้เลยครับ",
     },
   ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
-  const { books } = useBooks();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const matchBooksFromRecommendations = (
-    recs: ChatRecommendation[],
-    allBooks: Book[]
-  ) => {
-    if (!recs?.length || !allBooks.length) return [];
+  const matchBooks = (recs: ChatRecommendation[] = []) =>
+    recs
+      .map((rec) => {
+        const target = rec.title?.trim().toLowerCase() || "";
 
-    const results: Array<{ book: Book; reason?: string }> = [];
-    const seen = new Set<string>();
+        const book = books.find((b) => {
+          const title = b.title?.toLowerCase() || "";
+          const titleEn = b.titleEn?.toLowerCase() || "";
 
-    for (const rec of recs) {
-      const targetTitle = rec.title?.trim().toLowerCase();
-      if (!targetTitle) continue;
-
-      const matched = allBooks.find((b) => {
-        const th = b.title?.trim().toLowerCase();
-        const en = b.titleEn?.trim().toLowerCase();
-        return th === targetTitle || en === targetTitle;
-      });
-
-      if (matched && !seen.has(String(matched.id))) {
-        seen.add(String(matched.id));
-        results.push({
-          book: matched,
-          reason: rec.reason,
+          return (
+            title.includes(target) ||
+            target.includes(title) ||
+            titleEn.includes(target)
+          );
         });
-      }
-    }
 
-    return results;
-  };
+        return book ? { book, reason: rec.reason } : null;
+      })
+      .filter(Boolean) as { book: Book; reason?: string }[];
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
 
     const userMsg = input.trim();
+
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
     setLoading(true);
+    setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
 
     try {
       const booksContext = books.map((b: any) => ({
@@ -88,25 +77,17 @@ export default function AIChatButton() {
       const res = await fetch("http://localhost:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          books: booksContext,
-        }),
+        body: JSON.stringify({ message: userMsg, books: booksContext }),
       });
 
       const data = await res.json();
-
-      const recommendedBooks = matchBooksFromRecommendations(
-        data?.recommendations ?? [],
-        books
-      );
 
       setMessages((prev) => [
         ...prev,
         {
           role: "bot",
           content: data?.reply || "ขออภัยครับ ระบบยังไม่สามารถตอบได้",
-          recommendedBooks,
+          recommendedBooks: matchBooks(data?.recommendations ?? []),
         },
       ]);
     } catch {
@@ -122,33 +103,26 @@ export default function AIChatButton() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
   return (
     <>
       <button
         onClick={() => setOpen((prev) => !prev)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-all"
+        className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition-all hover:bg-blue-700"
       >
         {open ? <X size={24} /> : <MessageCircle size={24} />}
       </button>
 
       {open && (
-        <div className="fixed bottom-24 right-6 z-50 w-80 sm:w-96 h-[520px] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl flex flex-col border border-gray-200 dark:border-gray-700">
-          <div className="px-4 py-3 bg-blue-600 rounded-t-2xl flex items-center gap-2">
+        <div className="fixed bottom-24 right-6 z-50 flex h-[520px] w-80 flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 sm:w-96">
+          <div className="flex items-center gap-2 rounded-t-2xl bg-blue-600 px-4 py-3">
             <MessageCircle size={20} className="text-white" />
-            <span className="text-white font-semibold">BookBot</span>
-            <span className="text-blue-200 text-xs ml-auto">
-              AI ผู้ช่วยแนะนำหนังสือ
+            <span className="font-semibold text-white">BookBot</span>
+            <span className="ml-auto text-xs text-blue-200">
+              ผู้ช่วยค้นหาและแนะนำหนังสือ
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 space-y-3 overflow-y-auto p-4">
             {messages.map((msg, i) => (
               <div
                 key={i}
@@ -157,45 +131,42 @@ export default function AIChatButton() {
                 }`}
               >
                 <div
-                  className={`${
+                  className={`max-w-[94%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                     msg.role === "user"
-                      ? "max-w-[80%] px-3 py-2 rounded-2xl text-sm leading-relaxed bg-blue-600 text-white rounded-br-sm"
-                      : "max-w-[94%] px-3 py-2 rounded-2xl text-sm leading-relaxed bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-sm"
+                      ? "rounded-br-sm bg-blue-600 text-white"
+                      : "rounded-bl-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
                   }`}
                 >
                   <div className="whitespace-pre-wrap">{msg.content}</div>
 
-                  {msg.role === "bot" &&
-                    msg.recommendedBooks &&
-                    msg.recommendedBooks.length > 0 && (
-                      <div className="mt-3 space-y-3">
-                        <div className="text-xs font-medium text-muted-foreground">
-                          หนังสือแนะนำ
-                        </div>
+                  {!!msg.recommendedBooks?.length && (
+                    <div className="mt-3 space-y-3">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        หนังสือแนะนำ
+                      </p>
 
-                        <div className="space-y-4">
-                          {msg.recommendedBooks.map(({ book, reason }) => (
-                            <div key={book.id} className="space-y-2">
-                              <div className="rounded-xl overflow-hidden bg-background">
-                                <BookCard book={book} />
-                              </div>
-                              {reason && (
-                                <p className="text-xs text-muted-foreground px-1">
-                                  {reason}
-                                </p>
-                              )}
-                            </div>
-                          ))}
+                      {msg.recommendedBooks.map(({ book, reason }) => (
+                        <div key={book.id} className="space-y-2">
+                          <div className="overflow-hidden rounded-xl bg-background">
+                            <BookCard book={book} />
+                          </div>
+
+                          {reason && (
+                            <p className="px-1 text-xs text-muted-foreground">
+                              {reason}
+                            </p>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
 
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-gray-100 dark:bg-gray-800 px-4 py-2 rounded-2xl rounded-bl-sm">
+                <div className="rounded-2xl rounded-bl-sm bg-gray-100 px-4 py-2 dark:bg-gray-800">
                   <Loader2 size={16} className="animate-spin text-gray-500" />
                 </div>
               </div>
@@ -204,20 +175,25 @@ export default function AIChatButton() {
             <div ref={bottomRef} />
           </div>
 
-          <div className="p-3 border-t border-gray-200 dark:border-gray-700 flex gap-2">
+          <div className="flex gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
             <input
-              type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
               placeholder="พิมพ์คำถามเกี่ยวกับหนังสือ..."
-              className="flex-1 text-sm px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 rounded-xl border border-gray-300 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
             />
+
             <button
               onClick={sendMessage}
               disabled={!input.trim() || loading}
               aria-label="ส่งข้อความ"
-              className="w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white flex items-center justify-center transition-all"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:opacity-40"
             >
               <Send size={16} />
             </button>
