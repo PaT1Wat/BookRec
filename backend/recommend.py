@@ -95,7 +95,6 @@ def build_book_tags(data):
 def book_match_genres(book_id, genres, book_tags):
     if not genres:
         return True
-
     need = {str(g).strip().lower() for g in genres}
     tags = {str(t).strip().lower() for t in book_tags.get(str(book_id), set())}
 
