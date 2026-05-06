@@ -76,7 +76,10 @@ async def chat(body: dict):
 
     except Exception as e:
         print("[api] chat failed:", e)
-        return {"reply": "ระบบแชตกำลังมีปัญหาชั่วคราว", "recommendations": []}
+        return {
+            "reply": f"เกิดข้อผิดพลาด: {str(e)}",
+            "recommendations": [],
+        }
 
 
 @app.get("/recommend/{user_id}")
@@ -111,10 +114,7 @@ def retrain():
 
     except Exception as e:
         print("[api] retrain failed:", e)
-        return {
-            "reply": f"เกิดข้อผิดพลาด: {str(e)}",
-            "recommendations": [],
-        }
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/")
