@@ -111,7 +111,10 @@ def retrain():
 
     except Exception as e:
         print("[api] retrain failed:", e)
-        return {"status": "error", "message": str(e)}
+        return {
+            "reply": f"เกิดข้อผิดพลาด: {str(e)}",
+            "recommendations": [],
+        }
 
 
 @app.get("/")
