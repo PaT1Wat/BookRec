@@ -75,7 +75,7 @@ function mapRow(row: any): Book {
 
   const resolvedTags = Array.isArray(row.bookTag)
     ? row.bookTag
-        .map((bt: any) => bt.tag?.tagName)
+        .map((bt: any) => bt.tag?.tagName ?? bt.tagName)
         .filter(Boolean)
     : [];
 
@@ -278,7 +278,38 @@ export function BooksProvider({ children }: { children: ReactNode }) {
       setBooks([]);
     } else if (data) {
       try {
-        setBooks(data.map(mapRow));
+        const { data: stats, error: statsError } = (await supabase
+          .from("book_interaction_stats" as any)
+          .select("*")) as any;
+        
+        if (statsError) {
+          console.error("Stats fetch error:", statsError);
+        }
+
+        const statsMap = new Map(
+          (stats ?? []).map((s: any) => [
+            String(s.bookID), 
+            s,
+          ])
+        );
+
+        const booksWithStats = data.map((row: any) => {
+          const book = mapRow(row);
+          const stat: any = statsMap.get(String(book.bookID));
+
+          return {
+            ...book,
+            rating: Number(stat?.rating ?? book.rating ?? 0),
+            reviewCount: Number(stat?.reviewCount ?? book.reviewCount ?? 0),
+
+            favoriteCount: Number(stat?.favoriteCount ?? 0),
+            reviewActionCount: Number(stat?.reviewActionCount ?? 0),
+            viewCount: Number(stat?.viewCount ?? 0),
+          };
+        });
+
+        setBooks(booksWithStats);
+
       } catch (e) {
         console.error("Mapping error:", e, data);
         setBooks([]);

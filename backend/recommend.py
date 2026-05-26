@@ -52,24 +52,19 @@ def action_weight(action):
         "search": 2.0,
         "detail": 1.2,
         "click": 1.0,
-        "view": 0.8,
+        "view": 0.15,
     }
-
     return weights.get(str(action or "").lower(), 0.0)
 
 
 def clean_ids(ids):
     result = []
-
     for value in ids:
         if value is None:
             continue
-
         value = str(value)
-
         if value not in result:
             result.append(value)
-
     return result
 
 
@@ -78,17 +73,13 @@ def build_book_tags(data):
         tag.get("tagID"): tag.get("tagName")
         for tag in data["tag"]
     }
-
     book_tags = defaultdict(set)
-
     for row in data["bookTag"]:
         book_id = row.get("bookID")
         tag_id = row.get("tagID")
         tag_name = tag_map.get(tag_id)
-
         if book_id and tag_name:
             book_tags[str(book_id)].add(str(tag_name))
-
     return book_tags
 
 
@@ -97,7 +88,6 @@ def book_match_genres(book_id, genres, book_tags):
         return True
     need = {str(g).strip().lower() for g in genres}
     tags = {str(t).strip().lower() for t in book_tags.get(str(book_id), set())}
-
     return need.issubset(tags)
 
 
@@ -111,33 +101,25 @@ def filter_by_genres(ids, genres, book_tags):
 
 def get_interacted_books(user_id, data):
     interacted = set()
-
     for row in data["interaction"]:
         if str(row.get("user_id")) == str(user_id):
             book_id = get_book_id(row)
-
             if book_id:
                 interacted.add(str(book_id))
-
     return interacted
 
 
 def build_item_features(data):
     book_tags = build_book_tags(data)
-
     features = {}
-
     for book in data["books"]:
         book_id = book.get("bookID")
-
         if not book_id:
             continue
-
         features[str(book_id)] = [
             f"tag:{tag}"
             for tag in book_tags.get(str(book_id), set())
         ]
-
     return features
 
 
@@ -154,12 +136,10 @@ def train_and_save_model(epochs=10):
             items.add(str(book_id))
 
     interaction_rows = []
-
     for row in data["interaction"]:
         user_id = row.get("user_id")
         book_id = get_book_id(row)
         weight = action_weight(row.get("actionType"))
-
         if user_id and book_id and weight > 0:
             users.add(str(user_id))
             items.add(str(book_id))
@@ -217,13 +197,13 @@ def train_and_save_model(epochs=10):
             file,
         )
 
+    print(f"[train] done — users={len(users)}, items={len(items)}, features={len(all_features)}")
     return True
 
 
 def load_model():
     if not MODEL_FILE.exists():
         return None
-
     with open(MODEL_FILE, "rb") as file:
         return pickle.load(file)
 
@@ -234,11 +214,9 @@ def fallback_from_interaction(user_id, n=12, genres=None):
     interacted = get_interacted_books(user_id, data)
 
     scores = defaultdict(float)
-
     for row in data["interaction"]:
         book_id = get_book_id(row)
         weight = action_weight(row.get("actionType"))
-
         if book_id and weight > 0:
             scores[str(book_id)] += weight
 
@@ -247,10 +225,24 @@ def fallback_from_interaction(user_id, n=12, genres=None):
         for book_id, _ in sorted(scores.items(), key=lambda x: -x[1])
         if book_id not in interacted
     ]
-
     ranked = filter_by_genres(ranked, genres, book_tags)
-
     return ranked[:n]
+
+
+def _do_predict(obj, uid, item_map, item_feature_tuples):
+    """
+    สร้าง item_features จาก tuples ที่บันทึกไว้ใน model
+    และ predict — แยกเป็นฟังก์ชันเพื่อให้ retry ได้ง่าย
+    """
+    dataset = obj["dataset"]
+    model = obj["model"]
+    item_features = dataset.build_item_features(item_feature_tuples)
+    scores = model.predict(
+        uid,
+        np.arange(len(item_map)),
+        item_features=item_features,
+    )
+    return scores
 
 
 def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = None):
@@ -261,10 +253,15 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
     obj = load_model()
 
     if obj is None:
-        return fallback_from_interaction(user_id, n, genres)
+        # ไม่มี model เลย — ลอง train ครั้งแรก
+        print("[recommend] no model found — training now...")
+        train_and_save_model(epochs=10)
+        obj = load_model()
+        if obj is None:
+            return fallback_from_interaction(user_id, n, genres)
 
-    model = obj["model"]
-    dataset = obj["dataset"]
+    model    = obj["model"]
+    dataset  = obj["dataset"]
     item_feature_tuples = obj["item_feature_tuples"]
 
     user_map, item_map, *_ = dataset.mapping()
@@ -273,34 +270,50 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
     if uid is None:
         return fallback_from_interaction(user_id, n, genres)
 
-    item_features = dataset.build_item_features(item_feature_tuples)
+    # ✅ จุดหลัก: ถ้า features ไม่ตรง → retrain อัตโนมัติ แล้ว retry 1 ครั้ง
+    try:
+        scores = _do_predict(obj, uid, item_map, item_feature_tuples)
 
-    scores = model.predict(
-        uid,
-        np.arange(len(item_map)),
-        item_features=item_features,
-    )
+    except ValueError as e:
+        print(f"[recommend] feature mismatch ({e}) — retraining model...")
+        result = train_and_save_model(epochs=10)
+
+        if result is None:
+            # ข้อมูลไม่พอ train → fallback
+            return fallback_from_interaction(user_id, n, genres)
+
+        # โหลด model ใหม่แล้ว retry
+        obj = load_model()
+        if obj is None:
+            return fallback_from_interaction(user_id, n, genres)
+
+        dataset  = obj["dataset"]
+        item_feature_tuples = obj["item_feature_tuples"]
+        user_map, item_map, *_ = dataset.mapping()
+        uid = user_map.get(str(user_id))
+
+        if uid is None:
+            return fallback_from_interaction(user_id, n, genres)
+
+        try:
+            scores = _do_predict(obj, uid, item_map, item_feature_tuples)
+        except Exception as e2:
+            print(f"[recommend] retry failed ({e2}) — fallback")
+            return fallback_from_interaction(user_id, n, genres)
 
     reverse_item_map = {v: k for k, v in item_map.items()}
 
     result = []
-
     for item_index in np.argsort(-scores):
         book_id = reverse_item_map.get(int(item_index))
-
         if not book_id:
             continue
-
         book_id = str(book_id)
-
         if book_id in interacted:
             continue
-
         if genres and not book_match_genres(book_id, genres, book_tags):
             continue
-
         result.append(book_id)
-
         if len(result) >= n:
             break
 

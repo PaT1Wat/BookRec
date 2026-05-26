@@ -24,17 +24,15 @@ const BookSection = ({ title, subtitle, books }: BookSectionProps) => {
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-        {books.map((book, i) => (
-          <div
-            key={book.id}
-            className={`animate-fade-in-up delay-${(i % 6) + 1}`}
-          >
-            <BookCard book={book} />
-          </div>
+        {books.map((book) => (
+          <BookCard key={book.id} book={book} />
         ))}
       </div>
     </section>
   );
 };
+
+BookSection.displayName = "BookSection";
+
 
 export default BookSection;

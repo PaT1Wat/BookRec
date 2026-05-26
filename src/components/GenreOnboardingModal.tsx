@@ -24,23 +24,30 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
   useEffect(() => {
     if (!open) return;
 
-    const fetchTags = async () => {
-      const { data, error } = await supabase
-        .from("tag")
-        .select("tagID, tagName, tagType")
-        .eq("tagType", "genre")
-        .order("tagID", { ascending: true });
+    const fetchData = async () => {
+      // ✅ โหลด genre tags ทั้งหมด + tags ที่ user เลือกไว้แล้ว พร้อมกัน
+      const [{ data: allTags }, { data: userTags }] = await Promise.all([
+        supabase
+          .from("tag")
+          .select("tagID, tagName, tagType")
+          .eq("tagType", "genre")
+          .order("tagID", { ascending: true }),
 
-      if (error) {
-        console.error("fetch tags error:", error);
-        return;
-      }
+        supabase
+          .from("user_tags")
+          .select("tagID")
+          .eq("user_id", userId),
+      ]);
 
-      setTags(data ?? []);
+      setTags(allTags ?? []);
+
+      // ✅ pre-select tags ที่มีอยู่แล้ว
+      const existingIds = (userTags ?? []).map((t: any) => t.tagID);
+      setSelected(existingIds);
     };
 
-    fetchTags();
-  }, [open]);
+    fetchData();
+  }, [open, userId]);
 
   if (!open) return null;
 
@@ -64,13 +71,10 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
 
     setLoading(true);
 
+    // ลบของเก่าแล้วใส่ใหม่ทั้งหมด
     await supabase.from("user_tags").delete().eq("user_id", userId);
 
-    const rows = selected.map((tagID) => ({
-      user_id: userId,
-      tagID,
-    }));
-
+    const rows = selected.map((tagID) => ({ user_id: userId, tagID }));
     const { error } = await supabase.from("user_tags").insert(rows);
 
     setLoading(false);
@@ -104,7 +108,6 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
         <div className="mt-4 flex flex-wrap gap-2">
           {tags.map((tag) => {
             const active = selected.includes(tag.tagID);
-
             return (
               <button
                 key={tag.tagID}
@@ -128,7 +131,7 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
           </span>
 
           <Button onClick={handleSave} disabled={loading}>
-            {loading ? "กำลังบันทึก..." : "เริ่มใช้งาน"}
+            {loading ? "กำลังบันทึก..." : "บันทึก"}
           </Button>
         </div>
       </div>

@@ -6,9 +6,8 @@ import BookCard from "@/components/BookCard";
 import type { Book } from "@/data/books";
 import { useFavorites } from "@/lib/favorites";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
 const TARGET_COUNT = 12;
-const FETCH_POOL = 36;
+const FETCH_POOL = 100;
 
 type RecommendationRow = {
   bookID: number;
@@ -19,147 +18,169 @@ export default function RecommendationSection() {
   const { user } = useAuth();
   const { books } = useBooks();
   const { favorites } = useFavorites();
-  const [recBooks, setRecBooks] = useState<Book[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [recBooks, setRecBooks] = useState<Book[]>(() => {
+    const keys = Object.keys(localStorage).filter((k) =>
+      k.startsWith("recommendations:")
+    );
+
+    const latestKey = keys.sort().at(-1);
+    if (!latestKey) return [];
+
+    try {
+      return JSON.parse(localStorage.getItem(latestKey) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [loading, setLoading] = useState(false);
   const favoriteSet = new Set((favorites ?? []).map(String));
+
+  const getTags = (book: any) =>
+    (book.tags ?? book.genres ?? []).map((t: string) => t.toLowerCase());
+
+  const hasSameTag = (book: any, targetTags: string[]) => {
+    const tags = getTags(book);
+    return tags.some((t: string) => targetTags.includes(t));
+  };
+
+  const getDailyCacheKey = (userId?: string) => {
+    const now = new Date();
+    const thHour = (now.getUTCHours() + 7) % 24;
+
+    if (thHour < 5) {
+      now.setUTCDate(now.getUTCDate() - 1);
+    }
+
+    const dateKey = now.toISOString().slice(0, 10);
+    return `recommendations:${userId ?? "guest"}:${dateKey}`;
+  };
   
   useEffect(() => {
     async function fetchRecs() {
       const db = supabase as any;
-      setLoading(true);
+  
 
-      try {
-        let apiBookIds: string[] = [];
-        let userRecs: RecommendationRow[] = [];
-        let generalRecs: RecommendationRow[] = [];
+      const cacheKey = getDailyCacheKey(user?.id);
+      const cached = localStorage.getItem(cacheKey);
 
-        // 1) เรียก backend เพื่อ generate/update hybrid recommendation ของ user
-        if (user?.id) {
-          try {
-            const res = await fetch(`${API_BASE_URL}/recommend/${user.id}`);
-            const json = await res.json();
-            console.log("Backend recommend response:", json);
-            apiBookIds = Array.isArray(json?.bookIDs)
-              ? json.bookIDs.map(String)
-              : [];
-          } catch (err) {
-            console.error("Failed to call backend /recommend:", err);
-          }
-        }
+      if (cached) {
+        const cachedBooks = JSON.parse(cached) as Book[];
 
-        // 2) อ่าน personalized hybrid recs จากตาราง recommendations
-        if (user?.id) {
-          const { data, error } = await db
-            .from("recommendations")
-            .select("bookID, score")
-            .eq("user_id", user.id)
-            .eq("rec_type", "hybrid")
-            .order("score", { ascending: false })
-            .limit(FETCH_POOL);
-
-          if (error) {
-            console.error("Recommendation query error (user hybrid):", error);
-          } else {
-            userRecs = data ?? [];
-          }
-        }
-
-        // 3) ถ้ายังไม่ครบ 12 ค่อยไปเอา general hybrid recommendations มาเติม
-        if (
-          apiBookIds.length < TARGET_COUNT ||
-          userRecs.length < TARGET_COUNT
-        ) {
-          const { data, error } = await db
-            .from("recommendations")
-            .select("bookID, score")
-            .is("user_id", null)
-            .eq("rec_type", "hybrid")
-            .order("score", { ascending: false })
-            .limit(FETCH_POOL);
-
-          if (error) {
-            console.error("Recommendation query error (general hybrid):", error);
-          } else {
-            generalRecs = data ?? [];
-          }
-        }
-
-        console.log("API bookIDs:", apiBookIds);
-        console.log("User hybrid recs:", userRecs);
-        console.log("General hybrid recs:", generalRecs);
-        console.log("Books loaded:", books.length);
-
-        if (books.length === 0) {
-          setRecBooks([]);
+        if (cachedBooks.length > 0) {
+          // setRecBooks(cachedBooks);
+          setLoading(false);
           return;
         }
+      }
 
-        // ใช้ทั้ง id และ bookID กันพลาด
+      try {
+
         const bookMap = new Map<string, Book>();
+
         for (const b of books) {
           bookMap.set(String(b.id), b);
+
           if (b.bookID !== undefined && b.bookID !== null) {
             bookMap.set(String(b.bookID), b);
           }
         }
 
-        const mergedIds: string[] = [];
-        const seen = new Set<string>();
+        const { data: profile } = await db
+          .from("profiles")
+          .select("favoriteGenres")
+          .eq("id", user.id)
+          .maybeSingle();
 
-        const addId = (rawId: string | number | null | undefined) => {
-          if (rawId === null || rawId === undefined) return;
+        const profileTags = (
+          profile?.favoriteGenres ?? []
+        ).map((t: string) => t.toLowerCase());
 
-          const key = String(rawId);
-          const book = bookMap.get(key);
+        const { data: interactions } = await db
+          .from("interaction")
+          .select("bookID, actionType")
+          .eq("user_id", user.id);
 
-          if (!book) return;
+        const favBookIds = (interactions ?? [])
+          .filter((i: any) => i.actionType === "favorite")
+          .map((i: any) => String(i.bookID));
 
-          const reactId = String(book.id);
-          const dbId = String(book.bookID ?? book.id);
+        const reviewBookIds = (interactions ?? [])
+          .filter((i: any) => i.actionType === "review")
+          .map((i: any) => String(i.bookID));
 
-          // ❌ ถ้าเล่มนี้อยู่ใน favorite แล้ว ไม่เอามาแนะนำ
-          if (favoriteSet.has(key) || favoriteSet.has(reactId) || favoriteSet.has(dbId)) {
-            return;
-          }
+        const favTags = favBookIds.flatMap((id: string) => {
+          const book = bookMap.get(id);
+          return book ? getTags(book) : [];
+        });
 
-          // ❌ ถ้าเคยกดใจ → ไม่เอา
-          if (favoriteSet.has(key)) return;
-          if (!seen.has(key)) {
-            seen.add(key);
-            mergedIds.push(key);
-          }
+        const reviewTags = reviewBookIds.flatMap((id: string) => {
+          const book = bookMap.get(id);
+          return book ? getTags(book) : [];
+        });
+
+        const used = new Set<string>();
+
+        const pickBooks = (
+          targetTags: string[],
+          count: number
+        ) => {
+          const result = books
+            .filter((b: any) => {
+              const id = String(b.bookID ?? b.id);
+
+              if (used.has(id)) return false;
+
+              if (favoriteSet.has(id)) return false;
+
+              return hasSameTag(b, targetTags);
+            })
+            .sort((a: any, b: any) => {
+              const ratingDiff =
+                Number(b.rating ?? 0) -
+                Number(a.rating ?? 0);
+
+              if (ratingDiff !== 0) {
+                return ratingDiff;
+              }
+
+              return (
+                Number(b.reviewCount ?? 0) -
+                Number(a.reviewCount ?? 0)
+              );
+            })
+            .slice(0, count);
+
+          result.forEach((b: any) => {
+            used.add(String(b.bookID ?? b.id));
+          });
+
+          return result;
         };
 
-        // priority 1: API (หลัก)
-        for (const id of apiBookIds) {
-          addId(id);
-          if (mergedIds.length >= TARGET_COUNT) break;
-        }
+        const profileBooks = pickBooks(profileTags, 6);
 
-        // ❌ ใช้ DB เฉพาะตอน API ว่างจริง ๆ เท่านั้น
-        if (mergedIds.length === 0) {
-          for (const item of userRecs) {
-            addId(item.bookID);
-            if (mergedIds.length >= TARGET_COUNT) break;
-          }
-        }
-      
-        if (mergedIds.length === 0) {
-          for (const item of generalRecs) {
-            addId(item.bookID);
-            if (mergedIds.length >= TARGET_COUNT) break;
-          }
-        }
+        const favBooks = pickBooks(favTags, 3);
 
-        const ordered = mergedIds
-          .map((id) => bookMap.get(String(id)))
-          .filter((b): b is Book => !!b)
+        const reviewBooks = pickBooks(reviewTags, 3);
+
+        const finalBooks = [
+          ...profileBooks,
+          ...favBooks,
+          ...reviewBooks,
+        ]
+          .sort((a: any, b: any) => {
+            const ratingDiff = Number(b.rating ?? 0) - Number(a.rating ?? 0);
+            if (ratingDiff !== 0) return ratingDiff;
+
+            return Number(b.reviewCount ?? 0) - Number(a.reviewCount ?? 0);
+          })
           .slice(0, TARGET_COUNT);
 
-        console.log("Merged IDs:", mergedIds);
-        console.log("Recommendation ordered books:", ordered);
+        localStorage.setItem(cacheKey, JSON.stringify(finalBooks));
 
-        setRecBooks(ordered);
+        setRecBooks(finalBooks);
+
+ 
       } catch (err) {
         console.error("Recommendation fetch failed:", err);
         setRecBooks([]);
@@ -168,12 +189,42 @@ export default function RecommendationSection() {
       }
     }
 
-    if (books.length > 0) {
+    if (recBooks.length > 0) return;
+
+    if (books.length > 0 && user?.id) {
       fetchRecs();
     }
-  }, [user, books, favorites]);
+  }, [user?.id, books.length, recBooks.length]);
 
-  if (loading || recBooks.length === 0) return null;
+  if (loading && recBooks.length === 0) {
+    return (
+      <section className="py-8">
+        <h2 className="text-xl font-bold text-foreground font-display">
+          🤖 แนะนำสำหรับคุณ
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          กำลังโหลดหนังสือแนะนำ...
+        </p>
+      </section>
+    );
+  }
+
+  if (recBooks.length === 0) {
+    return (
+      <section className="py-8 min-h-[520px]">
+        <div className="mb-4">
+          <h2 className="text-xl font-bold text-foreground font-display">
+            🤖 แนะนำสำหรับคุณ
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            กำลังเตรียมหนังสือแนะนำ...
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  <section className="py-8 min-h-[520px]"></section>
 
   return (
     <section className="py-8">

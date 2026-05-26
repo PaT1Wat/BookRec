@@ -51,34 +51,47 @@ async def chat(body: dict):
 
         user_msg = body.get("message", "")
         books_context = body.get("books", [])
+        history = body.get("history", [])
+        
+        history_text = "\n".join(
+            [
+                f"{m.get('role')}: {m.get('content')}" 
+                for m in history[-10:]  # เอาแค่ 10 ข้อความล่าสุดในประวัติการสนทนา
+                if m.get("content")  # กรองข้อความที่ไม่มี content
+            ]
+        )
 
         prompt = f"""
-คุณคือ BookBot ผู้ช่วยแนะนำหนังสือภาษาไทย
+        คุณคือ BookBot ผู้ช่วยแนะนำหนังสือภาษาไทย
 
-ข้อมูลหนังสือในระบบ:
-{json.dumps(books_context, ensure_ascii=False)}
+        ประวัติการสนทนาก่อนหน้า:
+        {history_text}
 
-กฎ:
-- ใช้ข้อมูลจากระบบนี้เท่านั้น
-- ห้ามแต่งข้อมูลที่ไม่มีในระบบ
-- ตอบกลับเป็น JSON เท่านั้น
-- recommendations ต้องเป็น array เสมอ
+        ข้อมูลหนังสือในระบบ:
+        {json.dumps(books_context, ensure_ascii=False)}
 
-รูปแบบ JSON:
+        กฎ:
+        - ใช้ข้อมูลจากระบบนี้เท่านั้น
+        - ห้ามแต่งข้อมูลที่ไม่มีในระบบ
+        - ถ้าผู้ใช้พูดต่อจากคำถามก่อนหน้า เช่น "ขอแบบมังงะ", "เอาแนวเดิม", "ขอแบบดราม่า"
+            ให้ใช้ประวัติการสนทนาก่อนหน้ามาช่วยตีความ
+        - ตอบกลับเป็น JSON เท่านั้น
+        - recommendations ต้องเป็น array เสมอ
 
-{{
-  "reply": "ข้อความตอบกลับ",
-  "recommendations": [
-    {{
-      "title": "ชื่อหนังสือ",
-      "reason": "เหตุผลที่แนะนำ"
-    }}
-  ]
-}}
+        รูปแบบ JSON:
+        {{
+            "reply": "ข้อความตอบกลับ",
+            "recommendations": [
+                {{
+                    "title": "ชื่อหนังสือ",
+                    "reason": "เหตุผลที่แนะนำ"
+                }},
+            ]
+        }}
 
-คำถาม:
-{user_msg}
-"""
+        คำถามล่าสุด:
+        {user_msg}
+        """
 
         response = None
         last_error = None

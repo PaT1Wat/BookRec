@@ -84,6 +84,13 @@ export default function AIChatButton() {
     if (!input.trim() || loading) return;
 
     const userMsg = input.trim();
+      const chatHistory = [
+      ...messages,
+      {
+        role: "user" as const,
+        content: userMsg,
+      },
+    ];
 
     setInput("");
 
@@ -98,7 +105,18 @@ export default function AIChatButton() {
     setLoading(true);
 
     try {
-      const normalized = userMsg.toLowerCase();
+
+      // เอาข้อความ user ล่าสุด ๆ มารวมกัน
+      // เช่น รอบก่อนถาม "แนวต่างโลก" รอบนี้ถาม "ขอแบบมังงะ"
+      // ระบบจะเข้าใจรวมเป็น "แนวต่างโลก ขอแบบมังงะ"
+      const contextText = chatHistory
+        .filter((m) => m.role === "user")
+        .slice(-3) // เอาแค่ 3 ข้อความล่าสุดของ user
+        .map((m) => m.content)
+        .join(" ")
+        .toLowerCase();
+
+      const normalized = contextText;
       
       const typeMap : Record<string, string> = {
         "มังงะ": "manga",
@@ -106,53 +124,78 @@ export default function AIChatButton() {
         "ไลท์โนเวล": "light-novel",
       };
 
-      const tagList = [
-        "แฟนตาซี",
-        "ไซไฟ",
-        "สืบสวน",
-        "โรแมนติก",
-        "คอมเมดี้",
-        "ดราม่า",
-        "ผจญภัย",
-        "สยองขวัญ",
-        "ชีวิตประจำวัน",
-        "แอ็กชัน",
-        "BL ( Boy Love )",
-        "GL ( Girl Love )",
-      ];
+      const tagList = Array.from(
+        new Set(
+          books.flatMap((b: any) =>
+            (b.tags ?? []).map((tag: string) => 
+              tag.toLowerCase().trim()
+            )
+          )
+        )
+      );
 
       const wantedType = Object.entries(typeMap).find(([thai]) =>
         normalized.includes(thai.toLowerCase())
       )?.[1];
 
       const wantedTags = tagList.filter((tag) =>
-        normalized.includes(tag.toLowerCase())
+        normalized.includes(tag)
       );
 
-      let booksContext = books
-        .filter((b: any) => {
-          const bookType = String(b.type || "").toLowerCase();
-          const bookTags = (b.tags ?? []).map((t: string) => t.toLowerCase());
+      const filteredBooks = books.filter((b: any) => {
+        const bookType = String(b.type || "").toLowerCase();
 
-          const matchType = !wantedType || bookType === wantedType;
-    
-          const matchTags =
-            wantedTags.length === 0 ||
-            wantedTags.some((tag) => bookTags.includes(tag.toLowerCase()));
+        const bookTags = (b.tags ?? []).map((t: string) =>
+          t.toLowerCase().trim()
+        );
 
-          return matchType && matchTags;
-        })
-        .slice(0, 10)
-        .map((b: any) => ({
-          title: b.title,
-          titleEn: b.titleEn,
-          type: b.type,
-          tags: b.tags ?? [],
-          authorName: b.authorName,
-          description: b.description ?? "",
-        }));
+        const matchType = !wantedType || bookType === wantedType;
+
+        const matchTags =
+          wantedTags.length === 0 ||
+          wantedTags.some((tag) => bookTags.includes(tag));
+
+        return matchType && matchTags;
+      });
+
+      // ถ้าผู้ใช้ไม่ได้ระบุประเภท เช่น ถามแค่ "สืบสวน"
+      // จะคละ มังงะ / นิยาย / ไลท์โนเวล ให้ Gemini เห็นครบกว่าเดิม
+      const selectedBooks = filteredBooks
+        .sort((a: any, b: any) => {
+          const aTags = (a.tags ?? []).length;
+          const bTags = (b.tags ?? []).length;
+
+          // หนังสือที่ tag เยอะกว่า จะถูกส่งไปให้ AI ก่อน
+          return bTags - aTags;
+      })
+      .slice(0, 12);
+
+      let booksContext = selectedBooks.map((b: any) => ({
+        title: b.title,
+        titleEn: b.titleEn,
+        type: b.type,
+        tags: b.tags ?? [],
+        authorName: b.authorName,
+        description: b.description ?? "",
+      }));
           
-      // ถ้าไม่เจอเลย ส่ง top books ไปแทน
+      // ถ้าไม่เจอเลย ให้ fallback เป็นประเภทที่ผู้ใช้ขอ
+      // เช่น ขอแบบมังงะ แต่ไม่มี tag ตรง ก็ยังส่งมังงะไปให้ AI
+      if (booksContext.length === 0 && wantedType) {
+        booksContext = books
+          .filter((b: any) => String(b.type || "").toLowerCase() === wantedType)
+          .slice(0, 10)
+          .map((b: any) => ({
+            title: b.title,
+            titleEn: b.titleEn,
+            type: b.type,
+            tags: b.tags ?? [],
+            authorName: b.authorName,
+            description: b.description ?? "",
+          }));
+      }
+      
+      // ถ้ายังไม่เจออีก ค่อยส่ง top books ไปให้ AI โดยไม่สนใจประเภทเลย
       if (booksContext.length === 0) {
         booksContext = books.slice(0, 10).map((b: any) => ({
           title: b.title,
@@ -176,6 +219,10 @@ export default function AIChatButton() {
 
           body: JSON.stringify({
             message: userMsg,
+            history: chatHistory.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
             books: booksContext,
           }),
         }

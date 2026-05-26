@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.1"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       author: {
@@ -462,35 +437,6 @@ export type Database = {
         }
         Relationships: []
       }
-      user_genres: {
-        Row: {
-          created_at: string | null
-          id: number
-          type_id: number
-          user_id: string
-        }
-        Insert: {
-          created_at?: string | null
-          id?: number
-          type_id: number
-          user_id: string
-        }
-        Update: {
-          created_at?: string | null
-          id?: number
-          type_id?: number
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "fk_type"
-            columns: ["type_id"]
-            isOneToOne: false
-            referencedRelation: "book_type"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       user_tags: {
         Row: {
           created_at: string | null
@@ -522,6 +468,32 @@ export type Database = {
       }
     }
     Views: {
+      book_interaction_stats: {
+        Row: {
+          bookID: number | null
+          favoriteCount: number | null
+          rating: number | null
+          reviewActionCount: number | null
+          reviewCount: number | null
+          viewCount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "interaction_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books"
+            referencedColumns: ["bookID"]
+          },
+          {
+            foreignKeyName: "interaction_bookID_fkey"
+            columns: ["bookID"]
+            isOneToOne: false
+            referencedRelation: "books_with_details"
+            referencedColumns: ["bookID"]
+          },
+        ]
+      }
       books_with_details: {
         Row: {
           authorID: number | null
@@ -710,9 +682,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
