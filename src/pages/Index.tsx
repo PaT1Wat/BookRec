@@ -285,13 +285,13 @@ const Index = () => {
       })
       .slice(0, 12)
   );
-  // ✅ มาใหม่ = หนังสือที่เพิ่มเข้าระบบภายใน 7 วันที่ผ่านมา
-  const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  // ✅ มาใหม่ = หนังสือที่เพิ่มเข้าระบบภายใน 30 วันที่ผ่านมา
+  const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
   const newBooks = filterByGenre(
     [...books]
       .filter((b) => {
         if (b.publishDate) {
-          return Date.now() - new Date(b.publishDate).getTime() <= ONE_WEEK_MS;
+          return Date.now() - new Date(b.publishDate).getTime() <= ONE_MONTH_MS;
         }
         return b.isNew === true;
       })

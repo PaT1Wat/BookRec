@@ -68,16 +68,18 @@ const BookCard = ({ book }: BookCardProps) => {
           </div>
 
           {/* BADGE ยอดนิยม / ใหม่ */}
-          {book.isPopular && (
-            <span className="absolute left-2 top-2 rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-bold text-white shadow">
-              ยอดนิยม
-            </span>
-          )}
-          {book.isNew && !book.isPopular && (
-            <span className="absolute left-2 top-2 rounded-full bg-blue-500 px-2 py-0.5 text-[11px] font-bold text-white shadow">
-              ใหม่
-            </span>
-          )}
+          <div className="absolute left-2 top-2 flex flex-col gap-1">
+            {book.isPopular && (
+              <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-bold text-white shadow">
+                ยอดนิยม
+              </span>
+            )}
+            {book.isNew && (
+              <span className="rounded-full bg-blue-500 px-2 py-0.5 text-[11px] font-bold text-white shadow">
+                ใหม่
+              </span>
+            )}
+          </div>
         </div>
       </Link>
 

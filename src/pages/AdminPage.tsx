@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, X, Save, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Save, Search, Users, BookOpen, Eye, EyeOff, Star, MessageSquare, AlertTriangle } from "lucide-react";
 import { useBooks } from "@/context/BooksContext";
 import { useAuth } from "@/context/AuthContext";
 import { type Book } from "@/data/books";
@@ -9,107 +9,61 @@ import { useToast } from "@/hooks/use-toast";
 import CoverUpload from "@/components/CoverUpload";
 import { supabase } from "@/integrations/supabase/client";
 
-/* =======================
-   ✅ FormData
-======================= */
+// ─── Types ────────────────────────────────────────────────────────────────────
 type FormData = {
-  title: string;
-  titleEn: string;
-  authorName: string;
-  publisherName: string;
-  price: number;
-  rating: number;
-  reviewCount: number;
-  coverUrl: string;
-  type: string;
-  genres: string[];
-  tags: string;
-  description: string;
-  isNew: boolean;
-  isPopular: boolean;
+  title: string; titleEn: string; authorName: string; publisherName: string;
+  price: number; rating: number; reviewCount: number; coverUrl: string;
+  type: string; genres: string[]; tags: string; description: string;
+  isNew: boolean; isPopular: boolean;
 };
 
+type UserRow = {
+  id: string; email: string; display_name: string | null;
+  role: string; created_at: string; avatar_url?: string | null;
+  reviewCount?: number; favoriteCount?: number;
+};
+
+type ReviewWithBook = {
+  reviewID: number; rating: number; comment: string | null;
+  createdAt: string; user_id: string;
+  display_name?: string | null;
+  book?: { bookID: number; title: string; coverImage: string | null };
+};
+
+type BookInteraction = { bookID: number; hasInteraction: boolean };
+
 const emptyForm: FormData = {
-  title: "",
-  titleEn: "",
-  authorName: "",
-  publisherName: "",
-  price: 0,
-  rating: 0,
-  reviewCount: 0,
-  coverUrl: "",
-  type: "manga",
-  genres: [],
-  tags: "",
-  description: "",
-  isNew: false,
-  isPopular: false,
+  title: "", titleEn: "", authorName: "", publisherName: "",
+  price: 0, rating: 0, reviewCount: 0, coverUrl: "", type: "manga",
+  genres: [], tags: "", description: "", isNew: false, isPopular: false,
 };
 
 const GENRE_LIST = [
-  "แอ็กชัน", "ผจญภัย", "แฟนตาซี", "โรแมนติก",
-  "ดราม่า", "คอมเมดี้", "สยองขวัญ", "สืบสวน",
-  "ไซไฟ", "ชีวิตประจำวัน", "BL ( Boy Love )", "GL ( Girl Love )",
+  "แอ็กชัน", "ผจญภัย", "แฟนตาซี", "โรแมนติก", "ดราม่า", "คอมเมดี้",
+  "สยองขวัญ", "สืบสวน", "ไซไฟ", "ชีวิตประจำวัน", "BL ( Boy Love )", "GL ( Girl Love )",
 ];
 
-/* =======================
-   🔽 Dropdown Component
-======================= */
-const Dropdown = ({
-  label,
-  value,
-  options,
-  placeholder,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  placeholder: string;
-  onChange: (val: string) => void;
+// ─── Dropdown ────────────────────────────────────────────────────────────────
+const Dropdown = ({ label, value, options, placeholder, onChange }: {
+  label: string; value: string; options: string[]; placeholder: string;
+  onChange: (v: string) => void;
 }) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-
-  const filtered = options.filter(o =>
-    o.toLowerCase().includes((search || value).toLowerCase())
-  );
-
+  const filtered = options.filter(o => o.toLowerCase().includes((search || value).toLowerCase()));
   return (
     <div className="space-y-1 relative">
       <label className="text-sm font-medium">{label}</label>
-      <Input
-        placeholder={placeholder}
-        value={value}
-        autoComplete="off"
-        onChange={e => {
-          onChange(e.target.value);
-          setSearch(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-      />
+      <Input placeholder={placeholder} value={value} autoComplete="off"
+        onChange={e => { onChange(e.target.value); setSearch(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
       {open && (
         <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border bg-white shadow-lg">
-          {filtered.length > 0 ? (
-            filtered.map(o => (
-              <li
-                key={o}
-                onMouseDown={() => {
-                  onChange(o);
-                  setSearch("");
-                  setOpen(false);
-                }}
-                className="cursor-pointer px-3 py-2 text-sm hover:bg-muted"
-              >
-                {o}
-              </li>
-            ))
-          ) : (
-            <li className="px-3 py-2 text-sm text-muted-foreground">
-              ไม่พบ — ใช้ชื่อที่พิมพ์ได้เลย
-            </li>
+          {filtered.length > 0 ? filtered.map(o => (
+            <li key={o} onMouseDown={() => { onChange(o); setSearch(""); setOpen(false); }}
+              className="cursor-pointer px-3 py-2 text-sm hover:bg-muted">{o}</li>
+          )) : (
+            <li className="px-3 py-2 text-sm text-muted-foreground">ไม่พบ — ใช้ชื่อที่พิมพ์ได้เลย</li>
           )}
         </ul>
       )}
@@ -117,471 +71,508 @@ const Dropdown = ({
   );
 };
 
-/* =======================
-   🏠 AdminPage
-======================= */
+// ─── AdminPage ────────────────────────────────────────────────────────────────
 const AdminPage = () => {
   const { books, addBook, updateBook, deleteBook } = useBooks();
   const { isAdmin, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
+  const [activeTab, setActiveTab] = useState<"users" | "books">("books");
+
+  // ── Book states ──
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(emptyForm);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [archiveConfirm, setArchiveConfirm] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Dropdown data
   const [authors, setAuthors] = useState<string[]>([]);
   const [publishers, setPublishers] = useState<string[]>([]);
+  const [bookInteractions, setBookInteractions] = useState<Map<number, boolean>>(new Map());
 
-  /* =======================
-     📦 Fetch authors & publishers
-  ======================= */
+  // ── User states ──
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [allReviews, setAllReviews] = useState<ReviewWithBook[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [reviewSearch, setReviewSearch] = useState("");
+
+  // ─── fetch book interactions (เพื่อตรวจว่าลบได้ไหม) ─────────────────────
   useEffect(() => {
-  const fetchMeta = async () => {
-    const [{ data: pubData }, { data: bookData }] = await Promise.all([
-      supabase.from("publisher" as any).select('"publisherName"'),
-      supabase.from("author" as any).select('"authorName"'),
-    ]);
+    const fetchInteractions = async () => {
+      const db = supabase as any;
+      const [{ data: reviews }, { data: favorites }, { data: interactions }] = await Promise.all([
+        db.from("review").select("bookID"),
+        db.from("favorite").select("bookID"),
+        db.from("interaction").select("bookID"),
+      ]);
+      const map = new Map<number, boolean>();
+      const addIds = (rows: any[]) => rows?.forEach((r: any) => {
+        if (r.bookID) map.set(r.bookID, true);
+      });
+      addIds(reviews ?? []); addIds(favorites ?? []); addIds(interactions ?? []);
+      setBookInteractions(map);
+    };
+    fetchInteractions();
+  }, [books]);
 
-    if (pubData) {
-      const uniquePublishers = [...new Set(
-        (pubData as any[]).map(p => p.publisherName).filter(Boolean)
-      )].sort((a, b) => a.localeCompare(b, "th"));
-      setPublishers(uniquePublishers);
-    }
+  // ─── fetch authors / publishers ───────────────────────────────────────────
+  useEffect(() => {
+    const fetchMeta = async () => {
+      const [{ data: pubData }, { data: authData }] = await Promise.all([
+        supabase.from("publisher" as any).select('"publisherName"'),
+        supabase.from("author" as any).select('"authorName"'),
+      ]);
+      if (pubData) setPublishers([...new Set((pubData as any[]).map(p => p.publisherName).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th")));
+      if (authData) setAuthors([...new Set((authData as any[]).map(b => b.authorName).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th")));
+    };
+    fetchMeta();
+  }, [books]);
 
-    if (bookData) {
-      const uniqueAuthors = [...new Set(
-        (bookData as any[]).map(b => b.authorName).filter(Boolean)
-      )].sort((a, b) => a.localeCompare(b, "th"));
-      setAuthors(uniqueAuthors);
-    }
-  };
-  fetchMeta();
-}, [books]); // refetch เมื่อ books เปลี่ยน
+  // ─── fetch users + reviews ────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeTab !== "users") return;
+    setUsersLoading(true);
+    const fetchUsers = async () => {
+      const db = supabase as any;
+      const [{ data: usersData }, { data: reviewsData }, { data: favsData }] = await Promise.all([
+        db.from("user").select("id, email, display_name, role, created_at"),
+        db.from("review").select("reviewID, rating, comment, createdAt, user_id, bookID"),
+        db.from("favorite").select("user_id, bookID"),
+      ]);
 
-  /* =======================
-     🔒 Protect Admin
-  ======================= */
+      const reviewCountMap = new Map<string, number>();
+      const favCountMap = new Map<string, number>();
+      (reviewsData ?? []).forEach((r: any) => reviewCountMap.set(r.user_id, (reviewCountMap.get(r.user_id) ?? 0) + 1));
+      (favsData ?? []).forEach((f: any) => favCountMap.set(f.user_id, (favCountMap.get(f.user_id) ?? 0) + 1));
+
+      const enriched: UserRow[] = (usersData ?? []).map((u: any) => ({
+        ...u,
+        reviewCount: reviewCountMap.get(u.id) ?? 0,
+        favoriteCount: favCountMap.get(u.id) ?? 0,
+      })).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setUsers(enriched);
+
+      // reviews + book info + user name
+      const bookMap = new Map(books.map(b => [Number((b as any).bookID ?? b.id), b]));
+      const userNameMap = new Map((usersData ?? []).map((u: any) => [u.id, u.display_name || u.email]));
+
+      const enrichedReviews: ReviewWithBook[] = (reviewsData ?? []).map((r: any) => {
+        const book = bookMap.get(r.bookID);
+        return {
+          ...r,
+          display_name: userNameMap.get(r.user_id) ?? "ไม่ทราบชื่อ",
+          book: book ? { bookID: Number((book as any).bookID ?? book.id), title: book.title, coverImage: (book as any).coverUrl ?? null } : undefined,
+        };
+      }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      setAllReviews(enrichedReviews);
+      setUsersLoading(false);
+    };
+    fetchUsers();
+  }, [activeTab, books]);
+
   if (authLoading) return <div className="p-10 text-center">กำลังโหลด...</div>;
-  if (!isAdmin) {
-    return (
-      <div className="p-10 text-center text-red-500">
-        ❌ คุณไม่มีสิทธิ์เข้าหน้านี้
-      </div>
-    );
-  }
+  if (!isAdmin) return <div className="p-10 text-center text-red-500">❌ คุณไม่มีสิทธิ์เข้าหน้านี้</div>;
 
-  /* =======================
-     🔍 Filter
-  ======================= */
-  const filtered = books.filter(b =>
-    (b.title || "").toLowerCase().includes(search.toLowerCase())
+  const filtered = books.filter(b => (b.title || "").toLowerCase().includes(search.toLowerCase()));
+  const filteredReviews = allReviews.filter(r =>
+    !reviewSearch ||
+    r.book?.title?.toLowerCase().includes(reviewSearch.toLowerCase()) ||
+    r.display_name?.toLowerCase().includes(reviewSearch.toLowerCase())
   );
 
-  /* =======================
-     🏷️ Toggle Genre
-  ======================= */
-  const toggleGenre = (genre: string) => {
-    setForm(prev => ({
-      ...prev,
-      genres: prev.genres.includes(genre)
-        ? prev.genres.filter(g => g !== genre)
-        : [...prev.genres, genre],
-    }));
-  };
+  const toggleGenre = (g: string) => setForm(prev => ({
+    ...prev, genres: prev.genres.includes(g) ? prev.genres.filter(x => x !== g) : [...prev.genres, g],
+  }));
 
-  /* =======================
-     ➕ Add
-  ======================= */
-  const openAdd = () => {
-    setEditingId(null);
-    setForm(emptyForm);
-    setShowForm(true);
-  };
-
-  /* =======================
-     ✏️ Edit
-  ======================= */
+  const openAdd = () => { setEditingId(null); setForm(emptyForm); setShowForm(true); };
   const openEdit = (book: Book) => {
     setEditingId(book.id);
     setForm({
-      title: book.title || "",
-      titleEn: book.titleEn || "",
-      authorName: book.authorName || "",
-      publisherName: book.publisherName || "",
-      price: book.price ?? 0,
-      rating: book.rating ?? 0,
-      reviewCount: book.reviewCount ?? 0,
-      coverUrl: book.coverUrl || "",
-      type: book.type || "manga",
-      genres: book.genres || [],
-      tags: (book.tags || []).join(", "),
-      description: book.description || "",
-      isNew: book.isNew ?? false,
-      isPopular: book.isPopular ?? false,
+      title: book.title || "", titleEn: book.titleEn || "",
+      authorName: book.authorName || "", publisherName: book.publisherName || "",
+      price: book.price ?? 0, rating: book.rating ?? 0, reviewCount: book.reviewCount ?? 0,
+      coverUrl: book.coverUrl || "", type: book.type || "manga",
+      genres: book.genres || [], tags: (book.tags || []).join(", "),
+      description: book.description || "", isNew: book.isNew ?? false, isPopular: book.isPopular ?? false,
     });
     setShowForm(true);
   };
 
-  /* =======================
-     💾 Save
-  ======================= */
   const handleSave = async () => {
-    if (!form.title.trim()) {
-      toast({ title: "กรุณากรอกชื่อเรื่อง", variant: "destructive" });
-      return;
-    }
-
+    if (!form.title.trim()) { toast({ title: "กรุณากรอกชื่อเรื่อง", variant: "destructive" }); return; }
     setSaving(true);
-
-    const tagsArray = form.tags
-      .split(",")
-      .map(t => t.trim())
-      .filter(Boolean);
-
+    const tagsArray = form.tags.split(",").map(t => t.trim()).filter(Boolean);
     const allTags = [...new Set([...form.genres, ...tagsArray])];
-
     try {
-      const payload = {
-        title: form.title,
-        titleEn: form.titleEn,
-        description: form.description,
-        coverUrl: form.coverUrl,
-        authorName: form.authorName,
-        publisherName: form.publisherName,
-        price: form.price,
-        rating: form.rating,
-        reviewCount: form.reviewCount,
-        type: form.type,
-        isNew: form.isNew,
-        isPopular: form.isPopular,
-        tags: allTags,
-      };
-
-      if (editingId) {
-        await updateBook(editingId, payload);
-        toast({ title: "แก้ไขหนังสือสำเร็จ ✅" });
-      } else {
-        await addBook(payload);
-        toast({ title: "เพิ่มหนังสือสำเร็จ ✅" });
-      }
-
-      setShowForm(false);
-      setForm(emptyForm);
-      setEditingId(null);
+      const payload = { ...form, tags: allTags };
+      if (editingId) { await updateBook(editingId, payload); toast({ title: "แก้ไขหนังสือสำเร็จ ✅" }); }
+      else { await addBook(payload); toast({ title: "เพิ่มหนังสือสำเร็จ ✅" }); }
+      setShowForm(false); setForm(emptyForm); setEditingId(null);
     } catch (err: any) {
-      toast({
-        title: "เกิดข้อผิดพลาด",
-        description: err?.message || "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
+      toast({ title: "เกิดข้อผิดพลาด", description: err?.message, variant: "destructive" });
+    } finally { setSaving(false); }
   };
 
-  /* =======================
-     🗑️ Delete
-  ======================= */
   const handleDelete = async (id: string) => {
+    try { await deleteBook(id); setDeleteConfirm(null); toast({ title: "ลบหนังสือสำเร็จ 🗑️" }); }
+    catch (err: any) { toast({ title: "เกิดข้อผิดพลาด", description: err?.message, variant: "destructive" }); }
+  };
+
+  // ซ่อน = ปิด isPopular + isNew (ไม่โผล่ในหน้าแรก)
+  const handleArchive = async (book: Book) => {
     try {
-      await deleteBook(id);
-      setDeleteConfirm(null);
-      toast({ title: "ลบหนังสือสำเร็จ 🗑️" });
-    } catch (err: any) {
-      toast({
-        title: "เกิดข้อผิดพลาด",
-        description: err?.message || "Unknown error",
-        variant: "destructive",
+      await updateBook(book.id, {
+        title: book.title, titleEn: book.titleEn, description: book.description,
+        coverUrl: book.coverUrl, authorName: book.authorName || book.author,
+        publisherName: book.publisherName || book.publisher, price: book.price,
+        rating: book.rating, reviewCount: book.reviewCount, type: book.type,
+        tags: book.tags, isNew: false, isPopular: false,
       });
+      setArchiveConfirm(null);
+      toast({ title: "ซ่อนหนังสือสำเร็จ 👁️" });
+    } catch (err: any) {
+      toast({ title: "เกิดข้อผิดพลาด", description: err?.message, variant: "destructive" });
     }
   };
 
   return (
     <div className="container py-8">
-      {/* HEADER */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">🛠️ จัดการหนังสือ</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            ทั้งหมด {books.length} เล่ม
-          </p>
+      {/* ── Header + Tabs ── */}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">⚙️ จัดการระบบ</h1>
+        <div className="mt-4 flex gap-2 border-b border-border">
+          {[
+            { key: "books", label: "📚 จัดการหนังสือ", count: books.length },
+            { key: "users", label: "👥 จัดการผู้ใช้", count: users.length || undefined },
+          ].map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.key
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}>
+              {tab.label}
+              {tab.count !== undefined && (
+                <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{tab.count}</span>
+              )}
+            </button>
+          ))}
         </div>
-        <Button onClick={openAdd} className="gap-2">
-          <Plus className="h-4 w-4" /> เพิ่มหนังสือ
-        </Button>
       </div>
 
-      {/* SEARCH */}
-      <div className="relative mb-6">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="ค้นหาชื่อหนังสือ..."
-          className="pl-9"
-        />
-      </div>
-
-      {/* TABLE */}
-      <div className="rounded-xl border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-secondary">
-            <tr>
-              <th className="px-4 py-3 text-left">ปก</th>
-              <th className="px-4 py-3 text-left">ชื่อหนังสือ</th>
-              <th className="px-4 py-3 text-left">ผู้แต่ง</th>
-              <th className="px-4 py-3 text-left">สำนักพิมพ์</th>
-              <th className="px-4 py-3 text-right">จัดการ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(book => (
-              <tr key={book.id} className="border-t hover:bg-muted/30">
-                <td className="px-4 py-3">
-                  <img
-                    src={book.coverUrl || "/placeholder.svg"}
-                    alt={book.title || "book cover"}
-                    className="h-14 w-10 object-cover rounded"
-                  />
-                </td>
-                <td className="px-4 py-3 font-medium">{book.title}</td>
-                <td className="px-4 py-3 text-muted-foreground">{book.authorName || "-"}</td>
-                <td className="px-4 py-3 text-muted-foreground">{book.publisherName || "-"}</td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button size="icon" variant="ghost" onClick={() => openEdit(book)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    {deleteConfirm === book.id ? (
-                      <>
-                        <Button size="sm" variant="destructive" onClick={() => handleDelete(book.id)}>
-                          ยืนยัน
-                        </Button>
-                        <Button size="sm" onClick={() => setDeleteConfirm(null)}>
-                          ยกเลิก
-                        </Button>
-                      </>
-                    ) : (
-                      <Button size="icon" variant="ghost" onClick={() => setDeleteConfirm(book.id)}>
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {filtered.length === 0 && (
-          <div className="py-10 text-center text-muted-foreground">
-            ไม่พบข้อมูล
+      {/* ══════════════════════════════════
+          TAB: จัดการหนังสือ
+      ══════════════════════════════════ */}
+      {activeTab === "books" && (
+        <>
+          <div className="mb-6 flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">ทั้งหมด {books.length} เล่ม</p>
+            <Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" /> เพิ่มหนังสือ</Button>
           </div>
-        )}
-      </div>
 
-      {/* MODAL */}
+          <div className="relative mb-6">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาชื่อหนังสือ..." className="pl-9" />
+          </div>
+
+          {/* Legend */}
+          <div className="mb-3 flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1"><Trash2 className="h-3.5 w-3.5 text-red-400" /> ลบได้ (ไม่มีข้อมูลผูกพัน)</span>
+            <span className="flex items-center gap-1"><EyeOff className="h-3.5 w-3.5 text-amber-500" /> ซ่อน (มีรีวิว/ชื่นชอบ — ลบไม่ได้)</span>
+          </div>
+
+          <div className="rounded-xl border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary">
+                <tr>
+                  <th className="px-4 py-3 text-left">ปก</th>
+                  <th className="px-4 py-3 text-left">ชื่อหนังสือ</th>
+                  <th className="px-4 py-3 text-left">ผู้แต่ง</th>
+                  <th className="px-4 py-3 text-center">สถานะ</th>
+                  <th className="px-4 py-3 text-right">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(book => {
+                  const bookNumId = Number((book as any).bookID ?? book.id);
+                  const hasInteraction = bookInteractions.get(bookNumId) ?? false;
+                  const isHidden = !book.isPopular && !book.isNew;
+
+                  return (
+                    <tr key={book.id} className="border-t hover:bg-muted/30">
+                      <td className="px-4 py-3">
+                        <img src={book.coverUrl || "/placeholder.svg"} alt={book.title}
+                          className={`h-14 w-10 object-cover rounded ${isHidden ? "opacity-40 grayscale" : ""}`} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className={`font-medium ${isHidden ? "text-muted-foreground line-through" : ""}`}>{book.title}</p>
+                        {isHidden && <span className="text-xs text-amber-600">ซ่อนอยู่</span>}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{book.authorName || "-"}</td>
+                      <td className="px-4 py-3 text-center">
+                        {hasInteraction ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 border border-amber-200">
+                            <AlertTriangle className="h-3 w-3" /> มีข้อมูลผูกพัน
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 border border-green-200">
+                            ✓ ลบได้
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button size="icon" variant="ghost" onClick={() => openEdit(book)} title="แก้ไข">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+
+                          {hasInteraction ? (
+                            /* ซ่อน — ถ้ามีข้อมูลผูกพัน */
+                            archiveConfirm === book.id ? (
+                              <>
+                                <Button size="sm" variant="outline"
+                                  className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                                  onClick={() => handleArchive(book)}>
+                                  ยืนยันซ่อน
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setArchiveConfirm(null)}>ยกเลิก</Button>
+                              </>
+                            ) : (
+                              <Button size="icon" variant="ghost" title="ซ่อนหนังสือ"
+                                onClick={() => setArchiveConfirm(book.id)}>
+                                <EyeOff className="h-4 w-4 text-amber-500" />
+                              </Button>
+                            )
+                          ) : (
+                            /* ลบได้ — ถ้าไม่มีข้อมูลผูกพัน */
+                            deleteConfirm === book.id ? (
+                              <>
+                                <Button size="sm" variant="destructive" onClick={() => handleDelete(book.id)}>ยืนยัน</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setDeleteConfirm(null)}>ยกเลิก</Button>
+                              </>
+                            ) : (
+                              <Button size="icon" variant="ghost" title="ลบหนังสือ"
+                                onClick={() => setDeleteConfirm(book.id)}>
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            )
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filtered.length === 0 && <div className="py-10 text-center text-muted-foreground">ไม่พบข้อมูล</div>}
+          </div>
+        </>
+      )}
+
+      {/* ══════════════════════════════════
+          TAB: จัดการผู้ใช้
+      ══════════════════════════════════ */}
+      {activeTab === "users" && (
+        <div className="space-y-8">
+          {usersLoading ? (
+            <div className="py-10 text-center text-muted-foreground animate-pulse">กำลังโหลดข้อมูล...</div>
+          ) : (
+            <>
+              {/* ── Summary ── */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  { label: "ผู้ใช้ทั้งหมด", value: users.length, icon: Users, color: "text-blue-500", bg: "bg-blue-50" },
+                  { label: "รีวิวทั้งหมด", value: allReviews.length, icon: Star, color: "text-amber-500", bg: "bg-amber-50" },
+                  { label: "หนังสือที่มีรีวิว", value: new Set(allReviews.map(r => r.book?.bookID)).size, icon: BookOpen, color: "text-green-500", bg: "bg-green-50" },
+                  { label: "Admin", value: users.filter(u => u.role === "admin").length, icon: MessageSquare, color: "text-purple-500", bg: "bg-purple-50" },
+                ].map(s => (
+                  <div key={s.label} className="rounded-xl border bg-card p-4 shadow-sm">
+                    <div className={`inline-flex rounded-lg p-2 ${s.bg} mb-2`}>
+                      <s.icon className={`h-4 w-4 ${s.color}`} />
+                    </div>
+                    <p className="text-2xl font-bold">{s.value}</p>
+                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── User list ── */}
+              <div>
+                <h2 className="text-lg font-bold mb-3">👥 รายชื่อผู้ใช้งาน</h2>
+                <div className="rounded-xl border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-secondary">
+                      <tr>
+                        <th className="px-4 py-3 text-left">ผู้ใช้</th>
+                        <th className="px-4 py-3 text-left">อีเมล</th>
+                        <th className="px-4 py-3 text-center">สิทธิ์</th>
+                        <th className="px-4 py-3 text-center">รีวิว</th>
+                        <th className="px-4 py-3 text-center">ชื่นชอบ</th>
+                        <th className="px-4 py-3 text-left">สมัครเมื่อ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map(u => (
+                        <tr key={u.id} className="border-t hover:bg-muted/30">
+                          <td className="px-4 py-3 font-medium">{u.display_name || "—"}</td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">{u.email}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                              u.role === "admin"
+                                ? "bg-purple-100 text-purple-700"
+                                : "bg-gray-100 text-gray-600"
+                            }`}>{u.role}</span>
+                          </td>
+                          <td className="px-4 py-3 text-center">{u.reviewCount ?? 0}</td>
+                          <td className="px-4 py-3 text-center">{u.favoriteCount ?? 0}</td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {new Date(u.created_at).toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {users.length === 0 && <div className="py-10 text-center text-muted-foreground">ไม่พบข้อมูลผู้ใช้</div>}
+                </div>
+              </div>
+
+              {/* ── Reviews ── */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-bold">💬 รีวิวทั้งหมด ({allReviews.length} รายการ)</h2>
+                  <div className="relative w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input value={reviewSearch} onChange={e => setReviewSearch(e.target.value)}
+                      placeholder="ค้นหาหนังสือหรือผู้ใช้..." className="pl-9 h-8 text-sm" />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {filteredReviews.slice(0, 50).map(r => (
+                    <div key={r.reviewID} className="flex gap-3 rounded-xl border bg-card p-3 items-start">
+                      {r.book?.coverImage && (
+                        <img src={r.book.coverImage} alt={r.book.title}
+                          className="h-12 w-8 rounded object-cover flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">{r.book?.title ?? "ไม่ทราบชื่อ"}</span>
+                          <span className="text-xs text-muted-foreground">โดย {r.display_name}</span>
+                          <div className="flex gap-0.5 ml-auto">
+                            {[1,2,3,4,5].map(s => (
+                              <Star key={s} className={`h-3 w-3 ${s <= (r.rating ?? 0) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+                            ))}
+                          </div>
+                        </div>
+                        {r.comment && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{r.comment}</p>}
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          {r.createdAt ? new Date(r.createdAt).toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" }) : ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  {filteredReviews.length === 0 && (
+                    <div className="py-10 text-center text-muted-foreground">ไม่พบรีวิว</div>
+                  )}
+                  {filteredReviews.length > 50 && (
+                    <p className="text-center text-sm text-muted-foreground py-2">แสดง 50 / {filteredReviews.length} รายการ</p>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Book Form Modal ── */}
       {showForm && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50 p-4">
           <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-
-            {/* Modal Header */}
             <div className="flex justify-between items-center p-6 border-b sticky top-0 bg-white z-10">
-              <h2 className="text-xl font-bold">
-                {editingId ? "✏️ แก้ไขหนังสือ" : "📘 เพิ่มหนังสือใหม่"}
-              </h2>
-              <Button variant="ghost" size="icon" onClick={() => setShowForm(false)}>
-                <X className="h-5 w-5" />
-              </Button>
+              <h2 className="text-xl font-bold">{editingId ? "✏️ แก้ไขหนังสือ" : "📘 เพิ่มหนังสือใหม่"}</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowForm(false)}><X className="h-5 w-5" /></Button>
             </div>
-
-            {/* Modal Body */}
             <div className="p-6 space-y-5">
-
-              {/* ชื่อเรื่อง */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">ชื่อเรื่อง (ไทย) *</label>
-                  <Input
-                    placeholder="ชื่อภาษาไทย"
-                    value={form.title}
-                    onChange={e => setForm({ ...form, title: e.target.value })}
-                  />
+                  <Input placeholder="ชื่อภาษาไทย" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium">ชื่อเรื่อง (EN)</label>
-                  <Input
-                    placeholder="ชื่อภาษาอังกฤษ"
-                    value={form.titleEn}
-                    onChange={e => setForm({ ...form, titleEn: e.target.value })}
-                  />
+                  <Input placeholder="ชื่อภาษาอังกฤษ" value={form.titleEn} onChange={e => setForm({ ...form, titleEn: e.target.value })} />
                 </div>
               </div>
-
-              {/* ผู้แต่ง / สำนักพิมพ์ — Dropdown */}
               <div className="grid grid-cols-2 gap-3">
-                <Dropdown
-                  label="ผู้แต่ง *"
-                  value={form.authorName}
-                  options={authors}
-                  placeholder="ชื่อผู้แต่ง"
-                  onChange={val => setForm({ ...form, authorName: val })}
-                />
-                <Dropdown
-                  label="สำนักพิมพ์"
-                  value={form.publisherName}
-                  options={publishers}
-                  placeholder="ชื่อสำนักพิมพ์"
-                  onChange={val => setForm({ ...form, publisherName: val })}
-                />
+                <Dropdown label="ผู้แต่ง *" value={form.authorName} options={authors} placeholder="ชื่อผู้แต่ง" onChange={v => setForm({ ...form, authorName: v })} />
+                <Dropdown label="สำนักพิมพ์" value={form.publisherName} options={publishers} placeholder="ชื่อสำนักพิมพ์" onChange={v => setForm({ ...form, publisherName: v })} />
               </div>
-
-              {/* ราคา / คะแนน */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">ราคา (บาท)</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={form.price}
-                    onChange={e => setForm({ ...form, price: Number(e.target.value) })}
-                  />
+                  <Input type="number" min={0} value={form.price} onChange={e => setForm({ ...form, price: Number(e.target.value) })} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium">คะแนน (0-5)</label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={5}
-                    step={0.1}
-                    value={form.rating}
-                    onChange={e => setForm({ ...form, rating: Number(e.target.value) })}
-                  />
+                  <Input type="number" min={0} max={5} step={0.1} value={form.rating} onChange={e => setForm({ ...form, rating: Number(e.target.value) })} />
                 </div>
               </div>
-
-              {/* จำนวนรีวิว */}
               <div className="space-y-1">
                 <label className="text-sm font-medium">จำนวนรีวิว</label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.reviewCount}
-                  onChange={e => setForm({ ...form, reviewCount: Number(e.target.value) })}
-                  className="w-1/2"
-                />
+                <Input type="number" min={0} value={form.reviewCount} onChange={e => setForm({ ...form, reviewCount: Number(e.target.value) })} className="w-1/2" />
               </div>
-
-              {/* รูปปก */}
               <div className="space-y-1">
                 <label className="text-sm font-medium">รูปปก</label>
-                <CoverUpload
-                  value={form.coverUrl}
-                  onChange={(url) => setForm({ ...form, coverUrl: url })}
-                />
+                <CoverUpload value={form.coverUrl} onChange={url => setForm({ ...form, coverUrl: url })} />
               </div>
-
-              {/* ประเภท */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">ประเภท</label>
                 <div className="flex gap-2">
-                  {[
-                    { value: "manga", label: "มังงะ" },
-                    { value: "novel", label: "นิยาย" },
-                    { value: "light-novel", label: "ไลท์โนเวล" },
-                  ].map(opt => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setForm({ ...form, type: opt.value })}
-                      className={`rounded-full px-5 py-2 text-sm font-medium transition-colors ${
-                        form.type === opt.value
-                          ? "bg-primary text-white"
-                          : "bg-secondary text-secondary-foreground hover:bg-muted"
-                      }`}
-                    >
+                  {[{ value: "manga", label: "มังงะ" }, { value: "novel", label: "นิยาย" }, { value: "light-novel", label: "ไลท์โนเวล" }].map(opt => (
+                    <button key={opt.value} type="button" onClick={() => setForm({ ...form, type: opt.value })}
+                      className={`rounded-full px-5 py-2 text-sm font-medium transition-colors ${form.type === opt.value ? "bg-primary text-white" : "bg-secondary hover:bg-muted"}`}>
                       {opt.label}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* แนว */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">แนว (เลือกได้หลายแนว)</label>
+                <label className="text-sm font-medium">แนว</label>
                 <div className="flex flex-wrap gap-2">
-                  {GENRE_LIST.map(genre => (
-                    <button
-                      key={genre}
-                      type="button"
-                      onClick={() => toggleGenre(genre)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                        form.genres.includes(genre)
-                          ? "bg-primary text-white"
-                          : "bg-secondary text-secondary-foreground hover:bg-muted"
-                      }`}
-                    >
-                      {genre}
+                  {GENRE_LIST.map(g => (
+                    <button key={g} type="button" onClick={() => toggleGenre(g)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${form.genres.includes(g) ? "bg-primary text-white" : "bg-secondary hover:bg-muted"}`}>
+                      {g}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* แท็ก */}
               <div className="space-y-1">
                 <label className="text-sm font-medium">แท็ก (คั่นด้วย comma)</label>
-                <Input
-                  placeholder="เช่น อสูร, ดาบ, ครอบครัว"
-                  value={form.tags}
-                  onChange={e => setForm({ ...form, tags: e.target.value })}
-                />
+                <Input placeholder="เช่น อสูร, ดาบ, ครอบครัว" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} />
               </div>
-
-              {/* เรื่องย่อ */}
               <div className="space-y-1">
                 <label className="text-sm font-medium">เรื่องย่อ</label>
-                <textarea
-                  placeholder="เรื่องย่อ..."
-                  value={form.description}
-                  onChange={e => setForm({ ...form, description: e.target.value })}
-                  className="w-full border rounded-md p-2 text-sm min-h-[80px] resize-y"
-                  rows={3}
-                />
+                <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                  placeholder="เรื่องย่อ..." rows={3}
+                  className="w-full border rounded-md p-2 text-sm min-h-[80px] resize-y" />
               </div>
-
-              {/* Checkbox */}
               <div className="flex gap-6">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.isNew}
-                    onChange={e => setForm({ ...form, isNew: e.target.checked })}
-                    className="rounded"
-                  />
+                  <input type="checkbox" checked={form.isNew} onChange={e => setForm({ ...form, isNew: e.target.checked })} className="rounded" />
                   มาใหม่
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.isPopular}
-                    onChange={e => setForm({ ...form, isPopular: e.target.checked })}
-                    className="rounded"
-                  />
+                  <input type="checkbox" checked={form.isPopular} onChange={e => setForm({ ...form, isPopular: e.target.checked })} className="rounded" />
                   ยอดนิยม
                 </label>
               </div>
             </div>
-
-            {/* Modal Footer */}
             <div className="flex justify-end gap-2 p-6 border-t sticky bottom-0 bg-white">
-              <Button variant="outline" onClick={() => setShowForm(false)}>
-                ยกเลิก
-              </Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}>ยกเลิก</Button>
               <Button onClick={handleSave} disabled={saving}>
                 <Save className="h-4 w-4 mr-1" />
                 {saving ? "กำลังบันทึก..." : editingId ? "บันทึก" : "เพิ่มหนังสือ"}

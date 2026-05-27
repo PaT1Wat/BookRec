@@ -350,9 +350,9 @@ const BookDetailPage = () => {
               {tags.map((t) => (
                 <span
                   key={t}
-                  className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground"
+                  
                 >
-                  #{t}
+                 
                 </span>
               ))}
             </div>
