@@ -145,7 +145,7 @@ const SearchPage = () => {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="ค้นหาชื่อหนังสือ..."
+            placeholder="ค้นหาหนังสือ..."
             className="w-full rounded-xl border bg-card py-3 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
