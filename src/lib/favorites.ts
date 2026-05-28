@@ -1,94 +1,96 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
+import { clearUserRecsCache } from "@/lib/recsCache";
 
-/* =======================
-   Hook
-======================= */
+// ─── Module-level shared state ────────────────────────────────────────────────
+// ✅ ทุก component ที่เรียก useFavorites() ใช้ state ชุดเดียวกัน
+// ✅ toggle ที่ BookCard → FavoritesPage อัปเดตทันที ไม่ต้อง re-fetch
+
+let _sharedFavorites: string[] = [];
+let _loadedForUser: string | null = null;
+const _listeners = new Set<(favs: string[]) => void>();
+
+function notifyAll(favs: string[]) {
+  _sharedFavorites = favs;
+  _listeners.forEach((fn) => fn(favs));
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useFavorites() {
   const { user } = useAuth();
+  const [favorites, setFavorites] = useState<string[]>(_sharedFavorites);
 
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  // ─── subscribe ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const listener = (favs: string[]) => setFavorites([...favs]);
+    _listeners.add(listener);
+    setFavorites([..._sharedFavorites]); // sync ค่าล่าสุดตอน mount
+    return () => { _listeners.delete(listener); };
+  }, []);
 
-  /* =======================
-     📥 Fetch
-  ======================= */
-  const fetchFavorites = useCallback(async () => {
+  // ─── fetch จาก Supabase (เฉพาะตอน user เปลี่ยน) ────────────────────────
+  useEffect(() => {
     if (!user) {
-      setFavorites([]);
-      setLoading(false);
+      _loadedForUser = null;
+      notifyAll([]);
       return;
     }
 
-    const { data, error } = await supabase
-      .from("favorite")
-      .select("bookID")
-      .eq("user_id", user.id);
+    // ถ้า user เดิมแล้วมีข้อมูลอยู่แล้ว → ไม่ fetch ซ้ำ
+    if (_loadedForUser === user.id && _sharedFavorites.length > 0) return;
 
-    if (error) {
-      console.error("Favorites error:", error);
+    const fetchFavorites = async () => {
+      const { data, error } = await supabase
+        .from("favorite")
+        .select("bookID")
+        .eq("user_id", user.id);
+
+      if (!error) {
+        const ids = (data ?? []).filter((f) => f.bookID !== null).map((f) => String(f.bookID));
+        _loadedForUser = user.id;
+        notifyAll(ids);
+      }
+    };
+
+    fetchFavorites();
+  }, [user?.id]);
+
+  // ─── toggle ─────────────────────────────────────────────────────────────
+  const toggle = useCallback(async (bookId: string) => {
+    if (!user) { alert("กรุณาเข้าสู่ระบบก่อน"); return; }
+
+    const numericID = Number(bookId);
+    const isFav = _sharedFavorites.includes(bookId);
+
+    // ✅ อัปเดต shared state ทันที → ทุก component เห็นพร้อมกัน
+    const next = isFav
+      ? _sharedFavorites.filter((id) => id !== bookId)
+      : [..._sharedFavorites, bookId];
+    notifyAll(next);
+
+    // sync กับ Supabase
+    if (isFav) {
+      await supabase.from("favorite").delete().eq("user_id", user.id).eq("bookID", numericID);
     } else {
-      setFavorites(
-        (data ?? [])
-          .filter((f) => f.bookID !== null)
-          .map((f) => String(f.bookID))
-      );
+      await supabase.from("favorite").insert({ user_id: user.id, bookID: numericID });
     }
 
-    setLoading(false);
+    // trigger re-fetch recommendations
+    clearUserRecsCache(user.id);
   }, [user]);
 
-  useEffect(() => {
-    fetchFavorites();
-  }, [fetchFavorites]);
+  // ─── check ──────────────────────────────────────────────────────────────
+  const check = useCallback((bookId: string) => favorites.includes(bookId), [favorites]);
 
-  /* =======================
-     ❤️ Toggle
-  ======================= */
-  const toggle = useCallback(
-    async (bookId: string) => {
-      if (!user) {
-        alert("กรุณาเข้าสู่ระบบก่อน");
-        return;
-      }
+  // ─── refetch ─────────────────────────────────────────────────────────────
+  const refetch = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase.from("favorite").select("bookID").eq("user_id", user.id);
+    const ids = (data ?? []).filter((f) => f.bookID !== null).map((f) => String(f.bookID));
+    _loadedForUser = user.id;
+    notifyAll(ids);
+  }, [user]);
 
-      const numericID = Number(bookId);
-      const isFav = favorites.includes(bookId);
-
-      if (isFav) {
-        await supabase
-          .from("favorite")
-          .delete()
-          .eq("user_id", user.id)
-          .eq("bookID", numericID);
-
-        setFavorites((prev) => prev.filter((id) => id !== bookId));
-      } else {
-        await supabase.from("favorite").insert({
-          user_id: user.id,
-          bookID: numericID,
-        });
-
-        setFavorites((prev) => [...prev, bookId]);
-      }
-    },
-    [favorites, user]
-  );
-
-  /* =======================
-     ✅ Check
-  ======================= */
-  const check = useCallback(
-    (bookId: string) => favorites.includes(bookId),
-    [favorites]
-  );
-
-  return {
-    favorites,
-    toggle,
-    check,
-    loading,
-    refetch: fetchFavorites,
-  };
+  return { favorites, toggle, check, loading: false, refetch };
 }

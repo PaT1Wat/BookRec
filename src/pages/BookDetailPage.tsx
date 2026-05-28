@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate  } from "react-router-dom";
 import { Star, Heart, ArrowLeft, User, Building2, Send } from "lucide-react";
 import { useState, useEffect, useLayoutEffect } from "react";
 
@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import BookCard from "@/components/BookCard";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { clearUserRecsCache } from "@/lib/recsCache";
+
 
 type Review = {
   reviewID: number;
@@ -24,6 +26,7 @@ type Review = {
 
 const BookDetailPage = () => {
   const { id } = useParams();
+  const navigate = useNavigate(); // ✅ เพิ่ม
 
   const { books = [], refetch: refetchBooks, patchBook } = useBooks();
   const { toggle, check } = useFavorites();
@@ -90,7 +93,9 @@ const BookDetailPage = () => {
 
   useEffect(() => {
     if (id && user) {
-      logInteraction("view", Number(id));
+      logInteraction("view", Number(id)).then(() => {
+        refetchBooks();
+      });
     }
   }, [id, user]);
 
@@ -144,6 +149,7 @@ const BookDetailPage = () => {
       await refetchBooks();
 
       toast({ title: "ส่งความคิดเห็นสำเร็จ ✅" });
+      clearUserRecsCache(user.id); // ✅ trigger re-fetch recs อัตโนมัติ
     } catch (err: any) {
       toast({
         title: "เกิดข้อผิดพลาด",
@@ -165,6 +171,7 @@ const BookDetailPage = () => {
       if (user && id) {
         await logInteraction(wasFav ? "unfavorite" : "favorite", Number(id));
       }
+      await refetchBooks();
     } catch {
       toast({
         title: "เกิดข้อผิดพลาด",
@@ -222,13 +229,14 @@ const BookDetailPage = () => {
 
   return (
     <div className="container py-8">
-      <Link
-        to="/"
+      {/* ✅ ใช้ navigate(-1) กลับไปหน้าก่อนหน้า (search หรือ หน้าแรก) */}
+      <button
+        onClick={() => navigate(-1)}
         className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
         กลับ
-      </Link>
+      </button>
 
       <div className="grid gap-8 md:grid-cols-[280px_1fr]">
         <div className="space-y-4">
@@ -249,7 +257,7 @@ const BookDetailPage = () => {
             }`}
           >
             <Heart className={`h-4 w-4 ${isFav ? "fill-current" : ""}`} />
-            {isFav ? "ลบออกจากชั้นหนังสือ" : "เพิ่มในชั้นหนังสือ"}
+            {isFav ? "ลบออกจากหนังสือเล่มโปรด" : "เพิ่มในหนังสือเล่มโปรด"}
           </button>
         </div>
 

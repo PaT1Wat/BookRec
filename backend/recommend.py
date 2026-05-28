@@ -225,8 +225,23 @@ def fallback_from_interaction(user_id, n=12, genres=None):
         for book_id, _ in sorted(scores.items(), key=lambda x: -x[1])
         if book_id not in interacted
     ]
-    ranked = filter_by_genres(ranked, genres, book_tags)
-    return ranked[:n]
+    ranked_filtered = filter_by_genres(ranked, genres, book_tags)
+
+    # Fallback to other books in those genres sorted by rating/reviews if count is under n
+    if len(ranked_filtered) < n:
+        all_books_sorted = sorted(
+            data["books"],
+            key=lambda x: (-(x.get("rating") or 0.0), -(x.get("review_count") or 0))
+        )
+        for b in all_books_sorted:
+            bid = str(b.get("bookID") or "")
+            if bid and bid not in interacted and bid not in ranked_filtered:
+                if book_match_genres(bid, genres, book_tags):
+                    ranked_filtered.append(bid)
+                    if len(ranked_filtered) >= n:
+                        break
+
+    return ranked_filtered[:n]
 
 
 def _do_predict(obj, uid, item_map, item_feature_tuples):
@@ -245,10 +260,35 @@ def _do_predict(obj, uid, item_map, item_feature_tuples):
     return scores
 
 
+def get_user_preferred_genres(user_id):
+    try:
+        user_tags = supabase.table("user_tags").select("tagID").eq("user_id", user_id).execute().data or []
+        if not user_tags:
+            return []
+        tag_ids = [ut["tagID"] for ut in user_tags]
+        tags = supabase.table("tag").select("tagID, tagName, tagType").in_("tagID", tag_ids).execute().data or []
+        return [t["tagName"] for t in tags if t.get("tagType") == "genre"]
+    except Exception as e:
+        print(f"[recommend] failed to get user tags: {e}")
+        return []
+
+
 def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = None):
     data = fetch_data()
     book_tags = build_book_tags(data)
     interacted = get_interacted_books(user_id, data)
+
+    # If genres are not passed explicitly, get user's preferred genres
+    effective_genres = genres
+    if not effective_genres:
+        effective_genres = get_user_preferred_genres(user_id)
+
+    # Build set of book IDs that have at least one interaction in the system
+    interacted_book_ids = {
+        str(get_book_id(row))
+        for row in data["interaction"]
+        if get_book_id(row)
+    }
 
     obj = load_model()
 
@@ -258,7 +298,7 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
         train_and_save_model(epochs=10)
         obj = load_model()
         if obj is None:
-            return fallback_from_interaction(user_id, n, genres)
+            return fallback_from_interaction(user_id, n, effective_genres)
 
     model    = obj["model"]
     dataset  = obj["dataset"]
@@ -268,7 +308,7 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
     uid = user_map.get(str(user_id))
 
     if uid is None:
-        return fallback_from_interaction(user_id, n, genres)
+        return fallback_from_interaction(user_id, n, effective_genres)
 
     # ✅ จุดหลัก: ถ้า features ไม่ตรง → retrain อัตโนมัติ แล้ว retry 1 ครั้ง
     try:
@@ -280,12 +320,12 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
 
         if result is None:
             # ข้อมูลไม่พอ train → fallback
-            return fallback_from_interaction(user_id, n, genres)
+            return fallback_from_interaction(user_id, n, effective_genres)
 
         # โหลด model ใหม่แล้ว retry
         obj = load_model()
         if obj is None:
-            return fallback_from_interaction(user_id, n, genres)
+            return fallback_from_interaction(user_id, n, effective_genres)
 
         dataset  = obj["dataset"]
         item_feature_tuples = obj["item_feature_tuples"]
@@ -293,13 +333,13 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
         uid = user_map.get(str(user_id))
 
         if uid is None:
-            return fallback_from_interaction(user_id, n, genres)
+            return fallback_from_interaction(user_id, n, effective_genres)
 
         try:
             scores = _do_predict(obj, uid, item_map, item_feature_tuples)
         except Exception as e2:
             print(f"[recommend] retry failed ({e2}) — fallback")
-            return fallback_from_interaction(user_id, n, genres)
+            return fallback_from_interaction(user_id, n, effective_genres)
 
     reverse_item_map = {v: k for k, v in item_map.items()}
 
@@ -311,10 +351,15 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
         book_id = str(book_id)
         if book_id in interacted:
             continue
-        if genres and not book_match_genres(book_id, genres, book_tags):
+        # If explicit genres / user preferred genres are active
+        if effective_genres and not book_match_genres(book_id, effective_genres, book_tags):
+            continue
+        # If genres is explicitly selected (user clicked a genre filter tag on homepage)
+        # filter to only books that have had prior interaction
+        if genres and (book_id not in interacted_book_ids):
             continue
         result.append(book_id)
         if len(result) >= n:
             break
 
-    return result if result else fallback_from_interaction(user_id, n, genres)
+    return result if result else fallback_from_interaction(user_id, n, effective_genres)

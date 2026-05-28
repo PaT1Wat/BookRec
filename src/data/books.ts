@@ -41,6 +41,10 @@ export interface Book {
 
   isNew?: boolean;
   isPopular?: boolean;
+
+  favoriteCount?: number;
+  reviewActionCount?: number;
+  viewCount?: number;
 }
 
 // ===== STATIC GENRES =====

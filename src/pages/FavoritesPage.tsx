@@ -38,7 +38,7 @@ const FavoritesPage = () => {
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold">ชั้นหนังสือของฉัน</h1>
+          <h1 className="text-2xl font-bold">หนังสือเล่มโปรด</h1>
           <p className="text-sm text-muted-foreground">
             หนังสือที่คุณบันทึกไว้ • {favoriteBooks.length} เล่ม
           </p>
@@ -56,7 +56,7 @@ const FavoritesPage = () => {
           <BookOpen className="mb-4 h-16 w-16 text-muted-foreground/30" />
 
           <p className="text-lg font-medium text-muted-foreground">
-            ยังไม่มีหนังสือในชั้น
+            ยังไม่มีหนังสือเล่มโปรด
           </p>
 
           <Link

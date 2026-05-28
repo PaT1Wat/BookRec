@@ -12,9 +12,10 @@ type Props = {
   userId: string;
   open: boolean;
   onDone: () => void;
+  onSkip?: () => void;
 };
 
-export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
+export default function GenreOnboardingModal({ userId, open, onDone, onSkip }: Props) {
   const { toast } = useToast();
 
   const [tags, setTags] = useState<GenreTag[]>([]);
@@ -93,6 +94,10 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
       description: "ระบบจะใช้แนวที่คุณสนใจเพื่อแนะนำหนังสือ",
     });
 
+    try {
+      localStorage.removeItem(`skippedGenreOnboarding:${userId}`);
+    } catch {}
+
     onDone();
   };
 
@@ -130,9 +135,16 @@ export default function GenreOnboardingModal({ userId, open, onDone }: Props) {
             เลือกแล้ว {selected.length} แนว
           </span>
 
-          <Button onClick={handleSave} disabled={loading}>
-            {loading ? "กำลังบันทึก..." : "บันทึก"}
-          </Button>
+          <div className="flex gap-2">
+            {onSkip && (
+              <Button variant="outline" type="button" onClick={onSkip}>
+                ข้าม
+              </Button>
+            )}
+            <Button onClick={handleSave} disabled={loading}>
+              {loading ? "กำลังบันทึก..." : "บันทึก"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

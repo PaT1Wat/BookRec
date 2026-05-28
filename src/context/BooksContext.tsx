@@ -370,6 +370,14 @@ export function BooksProvider({ children }: { children: ReactNode }) {
             fetchBooks();
           }
         )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "interaction" },
+          () => {
+            console.debug("Realtime: interaction changed, refetching books");
+            fetchBooks();
+          }
+        )
         .subscribe();
 
       return () => {

@@ -10,7 +10,7 @@ const Navbar = () => {
   const links = [
     { to: "/", label: "หน้าแรก", icon: Home },
     { to: "/search", label: "ค้นหา", icon: Search },
-    { to: "/favorites", label: "ชั้นหนังสือ", icon: Heart },
+    { to: "/favorites", label: "หนังสือเล่มโปรด", icon: Heart },
     ...(isAdmin ? [{ to: "/dashboard", label: "สถิติ", icon: BarChart3 }, { to: "/admin", label: "จัดการ", icon: Settings }] : []),
   ];
 

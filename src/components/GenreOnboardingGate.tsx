@@ -7,7 +7,8 @@ export default function GenreOnboardingGate() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    setOpen(!loading && !!user && needsGenreOnboarding);
+    const skipped = localStorage.getItem(`skippedGenreOnboarding:${user?.id}`);
+    setOpen(!loading && !!user && needsGenreOnboarding && skipped !== "true");
   }, [loading, user, needsGenreOnboarding]);
 
   if (!user) return null;
@@ -19,6 +20,12 @@ export default function GenreOnboardingGate() {
       onDone={async () => {
         setOpen(false);
         await refreshProfile();
+      }}
+      onSkip={() => {
+        try {
+          localStorage.setItem(`skippedGenreOnboarding:${user.id}`, "true");
+        } catch {}
+        setOpen(false);
       }}
     />
   );
