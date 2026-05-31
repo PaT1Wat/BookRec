@@ -4,10 +4,7 @@ export type Genre = string;
 
 // ===== MAIN BOOK TYPE =====
 export interface Book {
-  // 🔥 IMPORTANT: ใช้ map กับ recommendation
-  bookID: number;     // ✅ เพิ่มตัวนี้
-
-  // ใช้ใน frontend routing
+  bookID: number;
   id: string;
 
   title: string;
@@ -19,7 +16,6 @@ export interface Book {
   publishDate?: string;
   slug?: string;
 
-  // relation (display)
   publisher?: string;
   publisherName?: string;
   authorName?: string;
@@ -28,12 +24,10 @@ export interface Book {
   tags: Genre[];
   genres: Genre[];
 
-  // relation (ID สำหรับ backend)
   publisherID?: number;
   typeId?: number;
   tagIDs?: number[];
 
-  // optional (UI)
   author?: string;
   rating?: number;
   reviewCount?: number;
@@ -41,6 +35,7 @@ export interface Book {
 
   isNew?: boolean;
   isPopular?: boolean;
+  isHidden?: boolean;   // ✅ เพิ่มตรงนี้
 
   favoriteCount?: number;
   reviewActionCount?: number;
@@ -49,16 +44,8 @@ export interface Book {
 
 // ===== STATIC GENRES =====
 export const genres: Genre[] = [
-  "แฟนตาซี",
-  "โรแมนติก",
-  "แอ็กชัน",
-  "คอมเมดี้",
-  "ดราม่า",
-  "สืบสวน",
-  "สยองขวัญ",
-  "ชีวิตประจำวัน",
-  "ผจญภัย",
-  "เหนือธรรมชาติ",
+  "แฟนตาซี", "โรแมนติก", "แอ็กชัน", "คอมเมดี้", "ดราม่า",
+  "สืบสวน", "สยองขวัญ", "ชีวิตประจำวัน", "ผจญภัย", "เหนือธรรมชาติ",
 ];
 
 export const sampleBooks: Book[] = [];

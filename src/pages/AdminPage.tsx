@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, X, Save, Search, Users, BookOpen, Eye, EyeOff, Star, MessageSquare, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Save, Search, Users, BookOpen, EyeOff, Star, MessageSquare, AlertTriangle } from "lucide-react";
 import { useBooks } from "@/context/BooksContext";
 import { useAuth } from "@/context/AuthContext";
 import { type Book } from "@/data/books";
@@ -9,12 +9,11 @@ import { useToast } from "@/hooks/use-toast";
 import CoverUpload from "@/components/CoverUpload";
 import { supabase } from "@/integrations/supabase/client";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 type FormData = {
   title: string; titleEn: string; authorName: string; publisherName: string;
-  price: number; rating: number; reviewCount: number; coverUrl: string;
+  price: number; coverUrl: string;
   type: string; genres: string[]; tags: string; description: string;
-  isNew: boolean; isPopular: boolean;
+  isNew: boolean; isHidden: boolean;
 };
 
 type UserRow = {
@@ -30,12 +29,10 @@ type ReviewWithBook = {
   book?: { bookID: number; title: string; coverImage: string | null };
 };
 
-type BookInteraction = { bookID: number; hasInteraction: boolean };
-
 const emptyForm: FormData = {
   title: "", titleEn: "", authorName: "", publisherName: "",
-  price: 0, rating: 0, reviewCount: 0, coverUrl: "", type: "manga",
-  genres: [], tags: "", description: "", isNew: false, isPopular: false,
+  price: 0, coverUrl: "", type: "manga",
+  genres: [], tags: "", description: "", isNew: false, isHidden: false,
 };
 
 const GENRE_LIST = [
@@ -43,7 +40,6 @@ const GENRE_LIST = [
   "สยองขวัญ", "สืบสวน", "ไซไฟ", "ชีวิตประจำวัน", "BL ( Boy Love )", "GL ( Girl Love )",
 ];
 
-// ─── Dropdown ────────────────────────────────────────────────────────────────
 const Dropdown = ({ label, value, options, placeholder, onChange }: {
   label: string; value: string; options: string[]; placeholder: string;
   onChange: (v: string) => void;
@@ -71,16 +67,17 @@ const Dropdown = ({ label, value, options, placeholder, onChange }: {
   );
 };
 
-// ─── AdminPage ────────────────────────────────────────────────────────────────
 const AdminPage = () => {
   const { books, addBook, updateBook, deleteBook } = useBooks();
   const { isAdmin, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<"users" | "books">("books");
-
-  // ── Book states ──
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "hasData" | "deletable" | "hidden">("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const BOOKS_PER_PAGE = 30;
+
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(emptyForm);
@@ -91,13 +88,13 @@ const AdminPage = () => {
   const [publishers, setPublishers] = useState<string[]>([]);
   const [bookInteractions, setBookInteractions] = useState<Map<number, boolean>>(new Map());
 
-  // ── User states ──
   const [users, setUsers] = useState<UserRow[]>([]);
   const [allReviews, setAllReviews] = useState<ReviewWithBook[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [reviewSearch, setReviewSearch] = useState("");
 
-  // ─── fetch book interactions (เพื่อตรวจว่าลบได้ไหม) ─────────────────────
+  const [userSubTab, setUserSubTab] = useState<"members" | "reviews">("members");
+
   useEffect(() => {
     const fetchInteractions = async () => {
       const db = supabase as any;
@@ -107,16 +104,13 @@ const AdminPage = () => {
         db.from("interaction").select("bookID"),
       ]);
       const map = new Map<number, boolean>();
-      const addIds = (rows: any[]) => rows?.forEach((r: any) => {
-        if (r.bookID) map.set(r.bookID, true);
-      });
+      const addIds = (rows: any[]) => rows?.forEach((r: any) => { if (r.bookID) map.set(r.bookID, true); });
       addIds(reviews ?? []); addIds(favorites ?? []); addIds(interactions ?? []);
       setBookInteractions(map);
     };
     fetchInteractions();
   }, [books]);
 
-  // ─── fetch authors / publishers ───────────────────────────────────────────
   useEffect(() => {
     const fetchMeta = async () => {
       const [{ data: pubData }, { data: authData }] = await Promise.all([
@@ -129,7 +123,6 @@ const AdminPage = () => {
     fetchMeta();
   }, [books]);
 
-  // ─── fetch users + reviews ────────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== "users") return;
     setUsersLoading(true);
@@ -140,33 +133,23 @@ const AdminPage = () => {
         db.from("review").select("reviewID, rating, comment, createdAt, user_id, bookID"),
         db.from("favorite").select("user_id, bookID"),
       ]);
-
       const reviewCountMap = new Map<string, number>();
       const favCountMap = new Map<string, number>();
       (reviewsData ?? []).forEach((r: any) => reviewCountMap.set(r.user_id, (reviewCountMap.get(r.user_id) ?? 0) + 1));
       (favsData ?? []).forEach((f: any) => favCountMap.set(f.user_id, (favCountMap.get(f.user_id) ?? 0) + 1));
-
       const enriched: UserRow[] = (usersData ?? []).map((u: any) => ({
-        ...u,
-        reviewCount: reviewCountMap.get(u.id) ?? 0,
-        favoriteCount: favCountMap.get(u.id) ?? 0,
+        ...u, reviewCount: reviewCountMap.get(u.id) ?? 0, favoriteCount: favCountMap.get(u.id) ?? 0,
       })).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
       setUsers(enriched);
-
-      // reviews + book info + user name
       const bookMap = new Map(books.map(b => [Number((b as any).bookID ?? b.id), b]));
       const userNameMap = new Map((usersData ?? []).map((u: any) => [u.id, u.display_name || u.email]));
-
       const enrichedReviews: ReviewWithBook[] = (reviewsData ?? []).map((r: any) => {
         const book = bookMap.get(r.bookID);
         return {
-          ...r,
-          display_name: userNameMap.get(r.user_id) ?? "ไม่ทราบชื่อ",
+          ...r, display_name: userNameMap.get(r.user_id) ?? "ไม่ทราบชื่อ",
           book: book ? { bookID: Number((book as any).bookID ?? book.id), title: book.title, coverImage: (book as any).coverUrl ?? null } : undefined,
         };
       }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
       setAllReviews(enrichedReviews);
       setUsersLoading(false);
     };
@@ -176,7 +159,27 @@ const AdminPage = () => {
   if (authLoading) return <div className="p-10 text-center">กำลังโหลด...</div>;
   if (!isAdmin) return <div className="p-10 text-center text-red-500">❌ คุณไม่มีสิทธิ์เข้าหน้านี้</div>;
 
-  const filtered = books.filter(b => (b.title || "").toLowerCase().includes(search.toLowerCase()));
+  // ── helpers ──
+  const getBookId = (b: any) => Number((b as any).bookID ?? b.id);
+  const countHasData   = books.filter(b => (bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
+  const countDeletable = books.filter(b => !(bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
+  const countHidden    = books.filter(b => b.isHidden ?? false).length;
+
+  const filtered = books.filter(book => {
+    const matchSearch = (book.title || "").toLowerCase().includes(search.toLowerCase());
+    const hasInteraction = bookInteractions.get(getBookId(book)) ?? false;
+    const isHidden = book.isHidden ?? false;
+    const matchStatus =
+      statusFilter === "all"       ? true
+      : statusFilter === "hasData"   ? hasInteraction && !isHidden
+      : statusFilter === "deletable" ? !hasInteraction && !isHidden
+      : isHidden;
+    return matchSearch && matchStatus;
+  });
+
+  const totalPages = Math.ceil(filtered.length / BOOKS_PER_PAGE);
+  const paginatedBooks = filtered.slice((currentPage - 1) * BOOKS_PER_PAGE, currentPage * BOOKS_PER_PAGE);
+
   const filteredReviews = allReviews.filter(r =>
     !reviewSearch ||
     r.book?.title?.toLowerCase().includes(reviewSearch.toLowerCase()) ||
@@ -193,10 +196,9 @@ const AdminPage = () => {
     setForm({
       title: book.title || "", titleEn: book.titleEn || "",
       authorName: book.authorName || "", publisherName: book.publisherName || "",
-      price: book.price ?? 0, rating: book.rating ?? 0, reviewCount: book.reviewCount ?? 0,
-      coverUrl: book.coverUrl || "", type: book.type || "manga",
+      price: book.price ?? 0, coverUrl: book.coverUrl || "", type: book.type || "manga",
       genres: book.genres || [], tags: (book.tags || []).join(", "),
-      description: book.description || "", isNew: book.isNew ?? false, isPopular: book.isPopular ?? false,
+      description: book.description || "", isNew: book.isNew ?? false, isHidden: book.isHidden ?? false,
     });
     setShowForm(true);
   };
@@ -207,7 +209,7 @@ const AdminPage = () => {
     const tagsArray = form.tags.split(",").map(t => t.trim()).filter(Boolean);
     const allTags = [...new Set([...form.genres, ...tagsArray])];
     try {
-      const payload = { ...form, tags: allTags };
+      const payload = { ...form, tags: allTags, rating: 0, reviewCount: 0, isPopular: false };
       if (editingId) { await updateBook(editingId, payload); toast({ title: "แก้ไขหนังสือสำเร็จ ✅" }); }
       else { await addBook(payload); toast({ title: "เพิ่มหนังสือสำเร็จ ✅" }); }
       setShowForm(false); setForm(emptyForm); setEditingId(null);
@@ -221,15 +223,13 @@ const AdminPage = () => {
     catch (err: any) { toast({ title: "เกิดข้อผิดพลาด", description: err?.message, variant: "destructive" }); }
   };
 
-  // ซ่อน = ปิด isPopular + isNew (ไม่โผล่ในหน้าแรก)
   const handleArchive = async (book: Book) => {
     try {
       await updateBook(book.id, {
         title: book.title, titleEn: book.titleEn, description: book.description,
         coverUrl: book.coverUrl, authorName: book.authorName || book.author,
         publisherName: book.publisherName || book.publisher, price: book.price,
-        rating: book.rating, reviewCount: book.reviewCount, type: book.type,
-        tags: book.tags, isNew: false, isPopular: false,
+        rating: 0, reviewCount: 0, type: book.type, tags: book.tags, isNew: false, isPopular: false,
       });
       setArchiveConfirm(null);
       toast({ title: "ซ่อนหนังสือสำเร็จ 👁️" });
@@ -238,21 +238,28 @@ const AdminPage = () => {
     }
   };
 
+  // ── filter button config ──
+  const filterBtns = [
+    { key: "all",       label: "ทั้งหมด",  count: books.length,   color: "blue" },
+    { key: "hasData",   label: "มีข้อมูล", count: countHasData,   color: "amber" },
+    { key: "deletable", label: "ลบได้",    count: countDeletable, color: "green" },
+    { key: "hidden",    label: "ซ่อนไว้",  count: countHidden,    color: "gray" },
+  ] as const;
+
   return (
     <div className="container py-8">
+
       {/* ── Header + Tabs ── */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold">⚙️ จัดการระบบ</h1>
         <div className="mt-4 flex gap-2 border-b border-border">
           {[
             { key: "books", label: "📚 จัดการหนังสือ", count: books.length },
-            { key: "users", label: "👥 จัดการผู้ใช้", count: users.length || undefined },
+            { key: "users", label: "👥 จัดการผู้ใช้",  count: users.length || undefined },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
               className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+                activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}>
               {tab.label}
               {tab.count !== undefined && (
@@ -268,14 +275,36 @@ const AdminPage = () => {
       ══════════════════════════════════ */}
       {activeTab === "books" && (
         <>
-          <div className="mb-6 flex items-center justify-between">
+          {/* Toolbar */}
+          <div className="mb-4 flex items-center justify-between">
             <p className="text-sm text-muted-foreground">ทั้งหมด {books.length} เล่ม</p>
-            <Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" /> เพิ่มหนังสือ</Button>
+            <Button onClick={openAdd} className="gap-2">
+              <Plus className="h-4 w-4" /> เพิ่มหนังสือ
+            </Button>
           </div>
 
+          {/* Status filter buttons */}
+          <div className="mb-4 flex flex-wrap gap-2">
+            {filterBtns.map(btn => (
+              <button key={btn.key}
+                onClick={() => { setStatusFilter(btn.key); setCurrentPage(1); }}
+                className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                  statusFilter === btn.key
+                    ? "bg-primary text-white border-primary"
+                    : "border-border bg-secondary hover:bg-muted"
+                }`}>
+                {btn.label}
+                <span className="ml-1.5 rounded-full bg-black/10 px-1.5 py-0.5 text-xs">{btn.count}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Search */}
           <div className="relative mb-6">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาชื่อหนังสือ..." className="pl-9" />
+            <Input value={search}
+              onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
+              placeholder="ค้นหาชื่อหนังสือ..." className="pl-9" />
           </div>
 
           {/* Legend */}
@@ -284,6 +313,7 @@ const AdminPage = () => {
             <span className="flex items-center gap-1"><EyeOff className="h-3.5 w-3.5 text-amber-500" /> ซ่อน (มีรีวิว/ชื่นชอบ — ลบไม่ได้)</span>
           </div>
 
+          {/* Table */}
           <div className="rounded-xl border overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-secondary">
@@ -296,10 +326,10 @@ const AdminPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(book => {
-                  const bookNumId = Number((book as any).bookID ?? book.id);
+                {paginatedBooks.map(book => {
+                  const bookNumId = getBookId(book);
                   const hasInteraction = bookInteractions.get(bookNumId) ?? false;
-                  const isHidden = !book.isPopular && !book.isNew;
+                  const isHidden = book.isHidden ?? false;
 
                   return (
                     <tr key={book.id} className="border-t hover:bg-muted/30">
@@ -330,7 +360,6 @@ const AdminPage = () => {
                           </Button>
 
                           {hasInteraction ? (
-                            /* ซ่อน — ถ้ามีข้อมูลผูกพัน */
                             archiveConfirm === book.id ? (
                               <>
                                 <Button size="sm" variant="outline"
@@ -347,7 +376,6 @@ const AdminPage = () => {
                               </Button>
                             )
                           ) : (
-                            /* ลบได้ — ถ้าไม่มีข้อมูลผูกพัน */
                             deleteConfirm === book.id ? (
                               <>
                                 <Button size="sm" variant="destructive" onClick={() => handleDelete(book.id)}>ยืนยัน</Button>
@@ -367,8 +395,21 @@ const AdminPage = () => {
                 })}
               </tbody>
             </table>
-            {filtered.length === 0 && <div className="py-10 text-center text-muted-foreground">ไม่พบข้อมูล</div>}
+            {filtered.length === 0 && (
+              <div className="py-10 text-center text-muted-foreground">ไม่พบข้อมูล</div>
+            )}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <Button variant="outline" size="sm" disabled={currentPage === 1}
+                onClick={() => setCurrentPage(p => p - 1)}>ก่อนหน้า</Button>
+              <span className="px-3 py-1.5 text-sm text-muted-foreground">{currentPage} / {totalPages}</span>
+              <Button variant="outline" size="sm" disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(p => p + 1)}>ถัดไป</Button>
+            </div>
+          )}
         </>
       )}
 
@@ -376,18 +417,18 @@ const AdminPage = () => {
           TAB: จัดการผู้ใช้
       ══════════════════════════════════ */}
       {activeTab === "users" && (
-        <div className="space-y-8">
+        <div className="space-y-6">
           {usersLoading ? (
             <div className="py-10 text-center text-muted-foreground animate-pulse">กำลังโหลดข้อมูล...</div>
           ) : (
             <>
-              {/* ── Summary ── */}
+              {/* Summary cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: "ผู้ใช้ทั้งหมด", value: users.length, icon: Users, color: "text-blue-500", bg: "bg-blue-50" },
-                  { label: "รีวิวทั้งหมด", value: allReviews.length, icon: Star, color: "text-amber-500", bg: "bg-amber-50" },
-                  { label: "หนังสือที่มีรีวิว", value: new Set(allReviews.map(r => r.book?.bookID)).size, icon: BookOpen, color: "text-green-500", bg: "bg-green-50" },
-                  { label: "Admin", value: users.filter(u => u.role === "admin").length, icon: MessageSquare, color: "text-purple-500", bg: "bg-purple-50" },
+                  { label: "ผู้ใช้ทั้งหมด",    value: users.length,                                        icon: Users,        color: "text-blue-500",   bg: "bg-blue-50" },
+                  { label: "รีวิวทั้งหมด",      value: allReviews.length,                                  icon: Star,         color: "text-amber-500",  bg: "bg-amber-50" },
+                  { label: "หนังสือที่มีรีวิว", value: new Set(allReviews.map(r => r.book?.bookID)).size,  icon: BookOpen,     color: "text-green-500",  bg: "bg-green-50" },
+                  { label: "Admin",              value: users.filter(u => u.role === "admin").length,       icon: MessageSquare,color: "text-purple-500", bg: "bg-purple-50" },
                 ].map(s => (
                   <div key={s.label} className="rounded-xl border bg-card p-4 shadow-sm">
                     <div className={`inline-flex rounded-lg p-2 ${s.bg} mb-2`}>
@@ -399,9 +440,26 @@ const AdminPage = () => {
                 ))}
               </div>
 
-              {/* ── User list ── */}
-              <div>
-                <h2 className="text-lg font-bold mb-3">👥 รายชื่อผู้ใช้งาน</h2>
+              {/* Sub-tabs */}
+              <div className="flex gap-1 border-b border-border">
+                {[
+                  { key: "members", label: "👥 รายชื่อผู้ใช้", count: users.length },
+                  { key: "reviews", label: "💬 รีวิวทั้งหมด",  count: allReviews.length },
+                ].map(t => (
+                  <button key={t.key} onClick={() => setUserSubTab(t.key as any)}
+                    className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                      userSubTab === t.key
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}>
+                    {t.label}
+                    <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{t.count}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Sub-tab: รายชื่อผู้ใช้ */}
+              {userSubTab === "members" && (
                 <div className="rounded-xl border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-secondary">
@@ -421,9 +479,7 @@ const AdminPage = () => {
                           <td className="px-4 py-3 text-muted-foreground text-xs">{u.email}</td>
                           <td className="px-4 py-3 text-center">
                             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              u.role === "admin"
-                                ? "bg-purple-100 text-purple-700"
-                                : "bg-gray-100 text-gray-600"
+                              u.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"
                             }`}>{u.role}</span>
                           </td>
                           <td className="px-4 py-3 text-center">{u.reviewCount ?? 0}</td>
@@ -435,53 +491,57 @@ const AdminPage = () => {
                       ))}
                     </tbody>
                   </table>
-                  {users.length === 0 && <div className="py-10 text-center text-muted-foreground">ไม่พบข้อมูลผู้ใช้</div>}
+                  {users.length === 0 && (
+                    <div className="py-10 text-center text-muted-foreground">ไม่พบข้อมูลผู้ใช้</div>
+                  )}
                 </div>
-              </div>
+              )}
 
-              {/* ── Reviews ── */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-bold">💬 รีวิวทั้งหมด ({allReviews.length} รายการ)</h2>
-                  <div className="relative w-64">
+              {/* Sub-tab: รีวิวทั้งหมด */}
+              {userSubTab === "reviews" && (
+                <div>
+                  <div className="relative mb-4 w-full sm:w-72">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input value={reviewSearch} onChange={e => setReviewSearch(e.target.value)}
-                      placeholder="ค้นหาหนังสือหรือผู้ใช้..." className="pl-9 h-8 text-sm" />
+                      placeholder="ค้นหาหนังสือหรือผู้ใช้..." className="pl-9 h-9 text-sm" />
+                  </div>
+                  <div className="space-y-2">
+                    {filteredReviews.slice(0, 50).map(r => (
+                      <div key={r.reviewID} className="flex gap-3 rounded-xl border bg-card p-3 items-start">
+                        {r.book?.coverImage && (
+                          <img src={r.book.coverImage} alt={r.book.title}
+                            className="h-12 w-8 rounded object-cover flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-sm">{r.book?.title ?? "ไม่ทราบชื่อ"}</span>
+                            <span className="text-xs text-muted-foreground">โดย {r.display_name}</span>
+                            <div className="flex gap-0.5 ml-auto">
+                              {[1, 2, 3, 4, 5].map(s => (
+                                <Star key={s} className={`h-3 w-3 ${s <= (r.rating ?? 0) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+                              ))}
+                            </div>
+                          </div>
+                          {r.comment && (
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{r.comment}</p>
+                          )}
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            {r.createdAt ? new Date(r.createdAt).toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" }) : ""}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {filteredReviews.length === 0 && (
+                      <div className="py-10 text-center text-muted-foreground">ไม่พบรีวิว</div>
+                    )}
+                    {filteredReviews.length > 50 && (
+                      <p className="text-center text-sm text-muted-foreground py-2">
+                        แสดง 50 / {filteredReviews.length} รายการ
+                      </p>
+                    )}
                   </div>
                 </div>
-
-                <div className="space-y-2">
-                  {filteredReviews.slice(0, 50).map(r => (
-                    <div key={r.reviewID} className="flex gap-3 rounded-xl border bg-card p-3 items-start">
-                      {r.book?.coverImage && (
-                        <img src={r.book.coverImage} alt={r.book.title}
-                          className="h-12 w-8 rounded object-cover flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">{r.book?.title ?? "ไม่ทราบชื่อ"}</span>
-                          <span className="text-xs text-muted-foreground">โดย {r.display_name}</span>
-                          <div className="flex gap-0.5 ml-auto">
-                            {[1,2,3,4,5].map(s => (
-                              <Star key={s} className={`h-3 w-3 ${s <= (r.rating ?? 0) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
-                            ))}
-                          </div>
-                        </div>
-                        {r.comment && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{r.comment}</p>}
-                        <p className="text-[11px] text-muted-foreground mt-1">
-                          {r.createdAt ? new Date(r.createdAt).toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" }) : ""}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                  {filteredReviews.length === 0 && (
-                    <div className="py-10 text-center text-muted-foreground">ไม่พบรีวิว</div>
-                  )}
-                  {filteredReviews.length > 50 && (
-                    <p className="text-center text-sm text-muted-foreground py-2">แสดง 50 / {filteredReviews.length} รายการ</p>
-                  )}
-                </div>
-              </div>
+              )}
             </>
           )}
         </div>
@@ -493,36 +553,33 @@ const AdminPage = () => {
           <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center p-6 border-b sticky top-0 bg-white z-10">
               <h2 className="text-xl font-bold">{editingId ? "✏️ แก้ไขหนังสือ" : "📘 เพิ่มหนังสือใหม่"}</h2>
-              <Button variant="ghost" size="icon" onClick={() => setShowForm(false)}><X className="h-5 w-5" /></Button>
+              <Button variant="ghost" size="icon" onClick={() => setShowForm(false)}>
+                <X className="h-5 w-5" />
+              </Button>
             </div>
             <div className="p-6 space-y-5">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">ชื่อเรื่อง (ไทย) *</label>
-                  <Input placeholder="ชื่อภาษาไทย" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+                  <Input placeholder="ชื่อภาษาไทย" value={form.title}
+                    onChange={e => { const v = e.target.value; if (/^[ก-๙0-9\s]*$/.test(v)) setForm({ ...form, title: v }); }} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium">ชื่อเรื่อง (EN)</label>
-                  <Input placeholder="ชื่อภาษาอังกฤษ" value={form.titleEn} onChange={e => setForm({ ...form, titleEn: e.target.value })} />
+                  <Input placeholder="ชื่อภาษาอังกฤษ" value={form.titleEn}
+                    onChange={e => { const v = e.target.value; if (/^[a-zA-Z0-9\s]*$/.test(v)) setForm({ ...form, titleEn: v }); }} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Dropdown label="ผู้แต่ง *" value={form.authorName} options={authors} placeholder="ชื่อผู้แต่ง" onChange={v => setForm({ ...form, authorName: v })} />
-                <Dropdown label="สำนักพิมพ์" value={form.publisherName} options={publishers} placeholder="ชื่อสำนักพิมพ์" onChange={v => setForm({ ...form, publisherName: v })} />
+                <Dropdown label="ผู้แต่ง *" value={form.authorName} options={authors} placeholder="ชื่อผู้แต่ง"
+                  onChange={v => setForm({ ...form, authorName: v })} />
+                <Dropdown label="สำนักพิมพ์" value={form.publisherName} options={publishers} placeholder="ชื่อสำนักพิมพ์"
+                  onChange={v => setForm({ ...form, publisherName: v })} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">ราคา (บาท)</label>
-                  <Input type="number" min={0} value={form.price} onChange={e => setForm({ ...form, price: Number(e.target.value) })} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">คะแนน (0-5)</label>
-                  <Input type="number" min={0} max={5} step={0.1} value={form.rating} onChange={e => setForm({ ...form, rating: Number(e.target.value) })} />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">จำนวนรีวิว</label>
-                <Input type="number" min={0} value={form.reviewCount} onChange={e => setForm({ ...form, reviewCount: Number(e.target.value) })} className="w-1/2" />
+              <div className="space-y-1 w-1/2">
+                <label className="text-sm font-medium">ราคา (บาท)</label>
+                <Input type="number" min={0} value={form.price}
+                  onChange={e => setForm({ ...form, price: Number(e.target.value) })} />
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium">รูปปก</label>
@@ -533,7 +590,9 @@ const AdminPage = () => {
                 <div className="flex gap-2">
                   {[{ value: "manga", label: "มังงะ" }, { value: "novel", label: "นิยาย" }, { value: "light-novel", label: "ไลท์โนเวล" }].map(opt => (
                     <button key={opt.value} type="button" onClick={() => setForm({ ...form, type: opt.value })}
-                      className={`rounded-full px-5 py-2 text-sm font-medium transition-colors ${form.type === opt.value ? "bg-primary text-white" : "bg-secondary hover:bg-muted"}`}>
+                      className={`rounded-full px-5 py-2 text-sm font-medium transition-colors ${
+                        form.type === opt.value ? "bg-primary text-white" : "bg-secondary hover:bg-muted"
+                      }`}>
                       {opt.label}
                     </button>
                   ))}
@@ -544,7 +603,9 @@ const AdminPage = () => {
                 <div className="flex flex-wrap gap-2">
                   {GENRE_LIST.map(g => (
                     <button key={g} type="button" onClick={() => toggleGenre(g)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${form.genres.includes(g) ? "bg-primary text-white" : "bg-secondary hover:bg-muted"}`}>
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                        form.genres.includes(g) ? "bg-primary text-white" : "bg-secondary hover:bg-muted"
+                      }`}>
                       {g}
                     </button>
                   ))}
@@ -552,7 +613,8 @@ const AdminPage = () => {
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium">แท็ก (คั่นด้วย comma)</label>
-                <Input placeholder="เช่น อสูร, ดาบ, ครอบครัว" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} />
+                <Input placeholder="เช่น อสูร, ดาบ, ครอบครัว" value={form.tags}
+                  onChange={e => setForm({ ...form, tags: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium">เรื่องย่อ</label>
@@ -562,12 +624,9 @@ const AdminPage = () => {
               </div>
               <div className="flex gap-6">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={form.isNew} onChange={e => setForm({ ...form, isNew: e.target.checked })} className="rounded" />
+                  <input type="checkbox" checked={form.isNew}
+                    onChange={e => setForm({ ...form, isNew: e.target.checked })} className="rounded" />
                   มาใหม่
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={form.isPopular} onChange={e => setForm({ ...form, isPopular: e.target.checked })} className="rounded" />
-                  ยอดนิยม
                 </label>
               </div>
             </div>
@@ -581,6 +640,7 @@ const AdminPage = () => {
           </div>
         </div>
       )}
+
     </div>
   );
 };

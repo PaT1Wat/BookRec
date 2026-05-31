@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import GenreOnboardingModal from "@/components/GenreOnboardingModal";
+import { clearUserRecsCache } from "@/lib/recsCache";
 
 type ReviewItem = {
   reviewID: number;
@@ -456,6 +457,7 @@ const ProfilePage = () => {
         userId={user.id}
         open={showGenreModal}
         onDone={() => {
+          clearUserRecsCache(user.id);  // ← ล้าง cache + ยิง recs:invalidate
           setShowGenreModal(false);
           window.location.reload();
         }}
