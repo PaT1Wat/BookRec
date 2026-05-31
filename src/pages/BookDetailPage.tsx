@@ -300,15 +300,14 @@ const BookDetailPage = () => {
               {avgRating.toFixed(1)}
             </span>
 
-            <span className="text-sm text-muted-foreground">
-              ({reviewCount} ครั้ง)
-            </span>
           </div>
 
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
             <span>❤️ Favorite: {favoriteCount}</span>
             <span>💬 Review: {reviewActionCount}</span>
             <span>👁️ View: {viewCount}</span>
+            <span>( {reviewCount} ครั้ง )</span>
+
           </div>
 
           <div className="text-2xl font-bold text-primary">฿{book.price ?? 0}</div>

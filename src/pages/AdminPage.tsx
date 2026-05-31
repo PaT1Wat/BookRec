@@ -622,13 +622,7 @@ const AdminPage = () => {
                   placeholder="เรื่องย่อ..." rows={3}
                   className="w-full border rounded-md p-2 text-sm min-h-[80px] resize-y" />
               </div>
-              <div className="flex gap-6">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={form.isNew}
-                    onChange={e => setForm({ ...form, isNew: e.target.checked })} className="rounded" />
-                  มาใหม่
-                </label>
-              </div>
+              
             </div>
             <div className="flex justify-end gap-2 p-6 border-t sticky bottom-0 bg-white">
               <Button variant="outline" onClick={() => setShowForm(false)}>ยกเลิก</Button>

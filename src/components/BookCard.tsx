@@ -18,9 +18,15 @@ const BookCard = ({ book }: BookCardProps) => {
   const [loading, setLoading] = useState(false);
   const isFav = check(book.id);
 
+  const favoriteCount     = Number((book as any).favoriteCount     ?? 0);
+  const reviewActionCount = Number((book as any).reviewActionCount ?? 0);
+  const viewCount         = Number((book as any).viewCount         ?? 0);
+  const reviewCount       = Number(book.reviewCount ?? 0);
+
+  const hasStats = favoriteCount > 0 || reviewActionCount > 0 || viewCount > 0 || reviewCount > 0;
+
   const logInteraction = async (actionType: string) => {
     if (!user) return;
-
     try {
       await supabase.from("interaction" as any).insert({
         bookID: Number(book.id),
@@ -37,14 +43,11 @@ const BookCard = ({ book }: BookCardProps) => {
     e.preventDefault();
     e.stopPropagation();
     if (loading) return;
-
     setLoading(true);
     try {
       const wasFav = check(book.id);
-
       await toggle(book.id);
       await logInteraction(wasFav ? "unfavorite" : "favorite");
-
       toast({ title: wasFav ? "ลบออกแล้ว 💔" : "เพิ่มในรายการแล้ว ❤️" });
     } catch {
       toast({ title: "เกิดข้อผิดพลาด", variant: "destructive" });
@@ -89,11 +92,7 @@ const BookCard = ({ book }: BookCardProps) => {
         onClick={handleToggle}
         disabled={loading}
         className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full transition-all duration-200
-          ${
-            isFav
-              ? "bg-white text-red-500"
-              : "bg-white/80 backdrop-blur text-muted-foreground hover:text-red-400"
-          }
+          ${isFav ? "bg-white text-red-500" : "bg-white/80 backdrop-blur text-muted-foreground hover:text-red-400"}
           ${loading ? "opacity-50 cursor-not-allowed" : ""}
         `}
       >
@@ -109,7 +108,7 @@ const BookCard = ({ book }: BookCardProps) => {
           </h3>
         </Link>
 
-        {/* ✅ ชื่ออังกฤษ — เพิ่มตรงนี้ */}
+        {/* ชื่ออังกฤษ */}
         {book.titleEn && (
           <p className="text-xs text-muted-foreground truncate italic">
             {book.titleEn}
@@ -121,10 +120,9 @@ const BookCard = ({ book }: BookCardProps) => {
           {book.authorName || book.author || "-"}
         </p>
 
-        {/* ⭐ Rating + ราคา */}
+        {/* ⭐ Rating + ราคา — ลบ (reviewCount) ออกจากแถวนี้แล้ว */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
-            {/* Render 5 small stars filled according to rounded rating */}
             <div className="flex items-center gap-0.5">
               {Array.from({ length: 5 }).map((_, i) => {
                 const filled = i < Math.round(book.rating ?? 0);
@@ -132,9 +130,7 @@ const BookCard = ({ book }: BookCardProps) => {
                   <Star
                     key={i}
                     className={`h-3 w-3 ${
-                      filled
-                        ? "fill-amber-400 text-amber-400"
-                        : "text-muted-foreground/30"
+                      filled ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"
                     }`}
                   />
                 );
@@ -143,15 +139,39 @@ const BookCard = ({ book }: BookCardProps) => {
             <span className="text-xs font-medium text-foreground">
               {(book.rating ?? 0).toFixed(1)}
             </span>
-            <span className="text-xs text-muted-foreground">
-              ({book.reviewCount ?? 0})
-            </span>
           </div>
 
           {(book.price ?? 0) > 0 && (
             <span className="text-sm font-bold text-primary">฿{book.price}</span>
           )}
         </div>
+
+        {/* ❤️💬👁️⭐ Interaction stats — ย้าย reviewCount มาไว้ที่นี่ */}
+        {hasStats && (
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5">
+            {favoriteCount > 0 && (
+              <span className="flex items-center gap-0.5">
+                <Heart className="h-2.5 w-2.5 fill-red-400 text-red-400" />
+                {favoriteCount}
+              </span>
+            )}
+            {reviewActionCount > 0 && (
+              <span className="flex items-center gap-0.5">
+                💬 {reviewActionCount}
+              </span>
+            )}
+            {viewCount > 0 && (
+              <span className="flex items-center gap-0.5">
+                👁️ {viewCount}
+              </span>
+            )}
+            {reviewCount > 0 && (
+              <span className="flex items-center gap-0.5">
+                ({reviewCount})
+              </span>
+            )}
+          </div>
+        )}
 
         {/* TAGS */}
         {book.tags && book.tags.length > 0 && (
