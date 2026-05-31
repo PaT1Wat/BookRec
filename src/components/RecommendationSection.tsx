@@ -100,23 +100,20 @@ export default function RecommendationSection() {
           .select("bookID, actionType")
           .eq("user_id", user.id);
 
-        const favBookIds = (interactions ?? [])
-          .filter((i: any) => i.actionType === "favorite")
-          .map((i: any) => String(i.bookID));
+        const interactionBookIds = [
+         ...new Set(
+            (interactions ?? []).map(
+              (i: any) => String(i.bookID)
+            )
+          ),
+        ];
 
-        const reviewBookIds = (interactions ?? [])
-          .filter((i: any) => i.actionType === "review")
-          .map((i: any) => String(i.bookID));
-
-        const favTags = favBookIds.flatMap((id: string) => {
-          const book = bookMap.get(id);
-          return book ? getTags(book) : [];
-        });
-
-        const reviewTags = reviewBookIds.flatMap((id: string) => {
-          const book = bookMap.get(id);
-          return book ? getTags(book) : [];
-        });
+        const interactionTags = interactionBookIds.flatMap(
+          (id: string) => {
+            const book = bookMap.get(id);
+            return book ? getTags(book) : [];
+          }
+        );
 
         const used = new Set<string>();
 
@@ -157,16 +154,27 @@ export default function RecommendationSection() {
           return result;
         };
 
-        const profileBooks = pickBooks(profileTags, 6);
+        const hasInteraction =
+          interactionBookIds.length > 0;
 
-        const favBooks = pickBooks(favTags, 3);
+        let profileBooks: Book[] = [];
+        let interactionBooks: Book[] = [];
 
-        const reviewBooks = pickBooks(reviewTags, 3);
+
+        if (hasInteraction) {
+          // 6 จากแนวที่เลือกตอนสมัคร
+          profileBooks = pickBooks(profileTags, 6);
+
+          // 6 จากพฤติกรรมผู้ใช้จริง
+          interactionBooks = pickBooks(interactionTags, 6);
+        } else {
+          // ยังไม่มี interaction
+          profileBooks = pickBooks(profileTags, 12);
+        }
 
         const finalBooks = [
           ...profileBooks,
-          ...favBooks,
-          ...reviewBooks,
+           ...interactionBooks,
         ]
           .sort((a: any, b: any) => {
             const ratingDiff = Number(b.rating ?? 0) - Number(a.rating ?? 0);
