@@ -301,7 +301,7 @@ const BookDetailPage = () => {
             </span>
 
             <span className="text-sm text-muted-foreground">
-              ({reviewCount} รีวิว)
+              ({reviewCount} ครั้ง)
             </span>
           </div>
 
