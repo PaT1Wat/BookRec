@@ -5,7 +5,6 @@ import { type BookType } from "@/data/books";
 import { supabase } from "@/integrations/supabase/client";
 import BookCard from "@/components/BookCard";
 
-// ✅ ตรงกับ tagName ใน DB แล้ว
 const GENRE_LIST = [
   "แอ็กชัน", "ผจญภัย", "แฟนตาซี", "โรแมนติก", "ดราม่า",
   "คอมเมดี้", "สยองขวัญ", "สืบสวน", "ไซไฟ", "ชีวิตประจำวัน", "BL ( Boy Love )", "GL ( Girl Love )",
@@ -35,12 +34,13 @@ const SearchPage = () => {
     const delay = setTimeout(async () => {
       setLoading(true);
 
+      // ✅ ดึง books และ interaction stats พร้อมกัน
       let queryBuilder = supabase
         .from("books")
         .select(
           `
           bookID, title, titleEn, description, coverImage,
-          publishDate, slug, is_new, is_popular, rating, review_count, price,
+          publishDate, slug, is_new, is_popular, is_hidden, rating, review_count, price,
 
           author!books_authorID_fkey ( authorID, authorName ),
           publisher!book_publisherID_fkey ( publisherID, publisherName ),
@@ -48,19 +48,18 @@ const SearchPage = () => {
 
           bookTag ( tag:tagID ( tagID, tagName ) )
         ` as any
-        );
-
-      // NOTE: do not apply full-text filter server-side because we also want to
-      // match author and publisher names which are joined relations. We'll
-      // fetch the candidate rows (optionally filtered by type) and then
-      // perform a case-insensitive text match on the client across
-      // title/titleEn/description/authorName/publisher.
+        )
+        // ✅ ไม่แสดงหนังสือที่ซ่อน
+        .eq("is_hidden", false);
 
       if (selectedType && TYPE_ID_MAP[selectedType]) {
         queryBuilder = (queryBuilder as any).eq("type_id", TYPE_ID_MAP[selectedType]);
       }
 
-      const { data, error } = await queryBuilder;
+      const [{ data, error }, { data: stats }] = await Promise.all([
+        queryBuilder,
+        supabase.from("book_interaction_stats" as any).select("*"),
+      ]);
 
       if (error) {
         console.error("Supabase error:", error);
@@ -68,28 +67,43 @@ const SearchPage = () => {
         return;
       }
 
-      let mapped = (data || []).map((b: any) => ({
-        id: String(b.bookID),
-        title: b.title ?? "",
-        titleEn: b.titleEn ?? "",
-        description: b.description ?? "",
-        coverUrl: b.coverImage ?? "",
-        publishDate: b.publishDate ?? "",
-        slug: b.slug ?? "",
-        publisher: b.publisher?.publisherName ?? "-",
-        authorName: b.author?.authorName ?? b.authorName ?? "-",
-        author: b.author?.authorName ?? b.authorName ?? "-",
-        type: b.book_type?.slug ?? (b.type?.slug ?? "manga"),
-        tags: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
-        genres: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
-        isNew: b.is_new ?? false,
-        isPopular: b.is_popular ?? false,
-        rating: b.rating ?? 0,
-        reviewCount: b.review_count ?? 0,
-        price: b.price ?? 0,
-      }));
+      // ✅ build stats lookup map
+      const statsMap = new Map(
+        (stats ?? []).map((s: any) => [String(s.bookID), s])
+      );
 
-      // client-side text search to include author and publisher matches
+      let mapped = (data || []).map((b: any) => {
+        const stat: any = statsMap.get(String(b.bookID));
+        return {
+          id: String(b.bookID),
+          bookID: b.bookID,
+          title: b.title ?? "",
+          titleEn: b.titleEn ?? "",
+          description: b.description ?? "",
+          coverUrl: b.coverImage ?? "",
+          publishDate: b.publishDate ?? "",
+          slug: b.slug ?? "",
+          publisher: b.publisher?.publisherName ?? "-",
+          authorName: b.author?.authorName ?? b.authorName ?? "-",
+          author: b.author?.authorName ?? b.authorName ?? "-",
+          type: b.book_type?.slug ?? "manga",
+          tags: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
+          genres: b.bookTag?.map((bt: any) => bt.tag?.tagName).filter(Boolean) ?? [],
+          isNew: b.is_new ?? false,
+          isPopular: b.is_popular ?? false,
+          isHidden: b.is_hidden ?? false,
+          // ✅ ใช้ค่าจาก stats ถ้ามี
+          rating: Number(stat?.rating ?? b.rating ?? 0),
+          reviewCount: Number(stat?.reviewCount ?? b.review_count ?? 0),
+          price: b.price ?? 0,
+          // ✅ interaction stats สำหรับ BookCard
+          favoriteCount: Number(stat?.favoriteCount ?? 0),
+          reviewActionCount: Number(stat?.reviewActionCount ?? 0),
+          viewCount: Number(stat?.viewCount ?? 0),
+        };
+      });
+
+      // client-side text search
       if (query) {
         const q = query.trim().toLowerCase();
         mapped = mapped.filter((b) => {

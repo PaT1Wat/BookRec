@@ -204,8 +204,9 @@ const BookDetailPage = () => {
   const genres = book.genres ?? [];
   const tags = book.tags ?? [];
 
-  const avgRating = Number(book.rating ?? 0);
-  const reviewCount = Number(book.reviewCount ?? 0);
+  const avgRating = reviews.length
+    ? Number((reviews.reduce((s, r) => s + (r.rating ?? 0), 0) / reviews.length).toFixed(1))
+    : Number(book.rating ?? 0);
 
   const favoriteCount = Number((book as any).favoriteCount ?? 0);
   const reviewActionCount = Number((book as any).reviewActionCount ?? 0);
@@ -306,7 +307,8 @@ const BookDetailPage = () => {
             <span>❤️ Favorite: {favoriteCount}</span>
             <span>💬 Review: {reviewActionCount}</span>
             <span>👁️ View: {viewCount}</span>
-            <span>( {reviewCount} ครั้ง )</span>
+            <span>( {favoriteCount + reviewActionCount + viewCount} interactions )</span>
+
 
           </div>
 
@@ -435,7 +437,7 @@ const BookDetailPage = () => {
           💬 รีวิวทั้งหมด
           {reviews.length > 0 && (
             <span className="ml-2 text-sm font-normal text-muted-foreground">
-              ({reviewCount} รีวิว)
+              ({reviews.length} รีวิว)
             </span>
           )}
         </h2>

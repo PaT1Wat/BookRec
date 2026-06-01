@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, X, Save, Search, Users, BookOpen, EyeOff, Star, MessageSquare, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Save, Search, Users, BookOpen, Eye, EyeOff, Star, MessageSquare, AlertTriangle } from "lucide-react";
 import { useBooks } from "@/context/BooksContext";
 import { useAuth } from "@/context/AuthContext";
 import { type Book } from "@/data/books";
@@ -68,7 +68,7 @@ const Dropdown = ({ label, value, options, placeholder, onChange }: {
 };
 
 const AdminPage = () => {
-  const { books, addBook, updateBook, deleteBook } = useBooks();
+  const { allBooks, addBook, updateBook, deleteBook } = useBooks();
   const { isAdmin, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
@@ -83,6 +83,7 @@ const AdminPage = () => {
   const [form, setForm] = useState<FormData>(emptyForm);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<string | null>(null);
+  const [unarchiveConfirm, setUnarchiveConfirm] = useState<string | null>(null); // ✅ เพิ่มใหม่
   const [saving, setSaving] = useState(false);
   const [authors, setAuthors] = useState<string[]>([]);
   const [publishers, setPublishers] = useState<string[]>([]);
@@ -95,12 +96,9 @@ const AdminPage = () => {
 
   const [userSubTab, setUserSubTab] = useState<"members" | "reviews">("members");
 
-  // ✅ ใช้ stats จาก books context (book_interaction_stats view) แทน fetch แยก
-  // เพราะ fetch แยกจะเจอปัญหา RLS — admin เห็นแค่ interaction ของตัวเอง
-  // book_interaction_stats aggregate จากทุก user ไม่มีปัญหา RLS
   useEffect(() => {
     const map = new Map<number, boolean>();
-    books.forEach((book: any) => {
+    allBooks.forEach((book: any) => {
       const bookId = Number(book.bookID ?? book.id);
       const hasData =
         (book.favoriteCount ?? 0) > 0 ||
@@ -110,7 +108,7 @@ const AdminPage = () => {
       if (hasData) map.set(bookId, true);
     });
     setBookInteractions(map);
-  }, [books]);
+  }, [allBooks]);
 
   useEffect(() => {
     const fetchMeta = async () => {
@@ -122,7 +120,7 @@ const AdminPage = () => {
       if (authData) setAuthors([...new Set((authData as any[]).map(b => b.authorName).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th")));
     };
     fetchMeta();
-  }, [books]);
+  }, [allBooks]);
 
   useEffect(() => {
     if (activeTab !== "users") return;
@@ -142,7 +140,8 @@ const AdminPage = () => {
         ...u, reviewCount: reviewCountMap.get(u.id) ?? 0, favoriteCount: favCountMap.get(u.id) ?? 0,
       })).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       setUsers(enriched);
-      const bookMap = new Map(books.map(b => [Number((b as any).bookID ?? b.id), b]));
+
+      const bookMap = new Map(allBooks.map(b => [Number((b as any).bookID ?? b.id), b]));
       const userNameMap = new Map((usersData ?? []).map((u: any) => [u.id, u.display_name || u.email]));
       const enrichedReviews: ReviewWithBook[] = (reviewsData ?? []).map((r: any) => {
         const book = bookMap.get(r.bookID);
@@ -155,18 +154,18 @@ const AdminPage = () => {
       setUsersLoading(false);
     };
     fetchUsers();
-  }, [activeTab, books]);
+  }, [activeTab, allBooks]);
 
   if (authLoading) return <div className="p-10 text-center">กำลังโหลด...</div>;
   if (!isAdmin) return <div className="p-10 text-center text-red-500">❌ คุณไม่มีสิทธิ์เข้าหน้านี้</div>;
 
   // ── helpers ──
   const getBookId = (b: any) => Number((b as any).bookID ?? b.id);
-  const countHasData   = books.filter(b => (bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
-  const countDeletable = books.filter(b => !(bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
-  const countHidden    = books.filter(b => b.isHidden ?? false).length;
+  const countHasData   = allBooks.filter(b => (bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
+  const countDeletable = allBooks.filter(b => !(bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
+  const countHidden    = allBooks.filter(b => b.isHidden ?? false).length;
 
-  const filtered = books.filter(book => {
+  const filtered = allBooks.filter(book => {
     const matchSearch = (book.title || "").toLowerCase().includes(search.toLowerCase());
     const hasInteraction = bookInteractions.get(getBookId(book)) ?? false;
     const isHidden = book.isHidden ?? false;
@@ -231,7 +230,7 @@ const AdminPage = () => {
         coverUrl: book.coverUrl, authorName: book.authorName || book.author,
         publisherName: book.publisherName || book.publisher, price: book.price,
         rating: 0, reviewCount: 0, type: book.type, tags: book.tags, isNew: false, isPopular: false,
-        isHidden: true,  // ✅ ซ่อนหนังสือ
+        isHidden: true,
       });
       setArchiveConfirm(null);
       toast({ title: "ซ่อนหนังสือสำเร็จ 👁️" });
@@ -240,12 +239,30 @@ const AdminPage = () => {
     }
   };
 
+  // ✅ ฟังก์ชันใหม่: ยกเลิกการซ่อนหนังสือ
+  const handleUnhide = async (book: Book) => {
+    try {
+      await updateBook(book.id, {
+        title: book.title, titleEn: book.titleEn, description: book.description,
+        coverUrl: book.coverUrl, authorName: book.authorName || book.author,
+        publisherName: book.publisherName || book.publisher, price: book.price,
+        rating: 0, reviewCount: 0, type: book.type, tags: book.tags,
+        isNew: book.isNew ?? false, isPopular: false,
+        isHidden: false,
+      });
+      setUnarchiveConfirm(null);
+      toast({ title: "ยกเลิกการซ่อนหนังสือสำเร็จ ✅" });
+    } catch (err: any) {
+      toast({ title: "เกิดข้อผิดพลาด", description: err?.message, variant: "destructive" });
+    }
+  };
+
   // ── filter button config ──
   const filterBtns = [
-    { key: "all",       label: "ทั้งหมด",  count: books.length,   color: "blue" },
-    { key: "hasData",   label: "มีข้อมูล", count: countHasData,   color: "amber" },
-    { key: "deletable", label: "ลบได้",    count: countDeletable, color: "green" },
-    { key: "hidden",    label: "ซ่อนไว้",  count: countHidden,    color: "gray" },
+    { key: "all",       label: "ทั้งหมด",  count: allBooks.length, color: "blue" },
+    { key: "hasData",   label: "มีข้อมูล", count: countHasData,    color: "amber" },
+    { key: "deletable", label: "ลบได้",    count: countDeletable,  color: "green" },
+    { key: "hidden",    label: "ซ่อนไว้",  count: countHidden,     color: "gray" },
   ] as const;
 
   return (
@@ -256,7 +273,7 @@ const AdminPage = () => {
         <h1 className="text-3xl font-bold">⚙️ จัดการระบบ</h1>
         <div className="mt-4 flex gap-2 border-b border-border">
           {[
-            { key: "books", label: "📚 จัดการหนังสือ", count: books.length },
+            { key: "books", label: "📚 จัดการหนังสือ", count: allBooks.length },
             { key: "users", label: "👥 จัดการผู้ใช้",  count: users.length || undefined },
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
@@ -279,7 +296,7 @@ const AdminPage = () => {
         <>
           {/* Toolbar */}
           <div className="mb-4 flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">ทั้งหมด {books.length} เล่ม</p>
+            <p className="text-sm text-muted-foreground">ทั้งหมด {allBooks.length} เล่ม</p>
             <Button onClick={openAdd} className="gap-2">
               <Plus className="h-4 w-4" /> เพิ่มหนังสือ
             </Button>
@@ -313,6 +330,7 @@ const AdminPage = () => {
           <div className="mb-3 flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1"><Trash2 className="h-3.5 w-3.5 text-red-400" /> ลบได้ (ไม่มีข้อมูล)</span>
             <span className="flex items-center gap-1"><EyeOff className="h-3.5 w-3.5 text-amber-500" /> ซ่อน (มีรีวิว/ชื่นชอบ — ลบไม่ได้)</span>
+            <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5 text-blue-500" /> ยกเลิกซ่อน</span>
           </div>
 
           {/* Table */}
@@ -345,7 +363,11 @@ const AdminPage = () => {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{book.authorName || "-"}</td>
                       <td className="px-4 py-3 text-center">
-                        {hasInteraction ? (
+                        {isHidden ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-0.5 text-xs text-gray-600 border border-gray-200">
+                            <EyeOff className="h-3 w-3" /> ซ่อนอยู่
+                          </span>
+                        ) : hasInteraction ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 border border-amber-200">
                             <AlertTriangle className="h-3 w-3" /> มีข้อมูล
                           </span>
@@ -361,7 +383,26 @@ const AdminPage = () => {
                             <Pencil className="h-4 w-4" />
                           </Button>
 
-                          {hasInteraction ? (
+                          {/* ✅ แยก 3 กรณี: ซ่อนอยู่ / มีข้อมูล / ลบได้ */}
+                          {isHidden ? (
+                            // กรณี: หนังสือซ่อนอยู่ → แสดงปุ่มยกเลิกซ่อน
+                            unarchiveConfirm === book.id ? (
+                              <>
+                                <Button size="sm" variant="outline"
+                                  className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                                  onClick={() => handleUnhide(book)}>
+                                  ยืนยันเปิดใช้
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setUnarchiveConfirm(null)}>ยกเลิก</Button>
+                              </>
+                            ) : (
+                              <Button size="icon" variant="ghost" title="ยกเลิกซ่อนหนังสือ"
+                                onClick={() => setUnarchiveConfirm(book.id)}>
+                                <Eye className="h-4 w-4 text-blue-500" />
+                              </Button>
+                            )
+                          ) : hasInteraction ? (
+                            // กรณี: มีข้อมูล → ซ่อนได้ แต่ลบไม่ได้
                             archiveConfirm === book.id ? (
                               <>
                                 <Button size="sm" variant="outline"
@@ -378,6 +419,7 @@ const AdminPage = () => {
                               </Button>
                             )
                           ) : (
+                            // กรณี: ไม่มีข้อมูล → ลบได้เลย
                             deleteConfirm === book.id ? (
                               <>
                                 <Button size="sm" variant="destructive" onClick={() => handleDelete(book.id)}>ยืนยัน</Button>
@@ -623,13 +665,6 @@ const AdminPage = () => {
                 <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
                   placeholder="เรื่องย่อ..." rows={3}
                   className="w-full border rounded-md p-2 text-sm min-h-[80px] resize-y" />
-              </div>
-              <div className="flex gap-6">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={form.isNew}
-                    onChange={e => setForm({ ...form, isNew: e.target.checked })} className="rounded" />
-                  มาใหม่
-                </label>
               </div>
             </div>
             <div className="flex justify-end gap-2 p-6 border-t sticky bottom-0 bg-white">

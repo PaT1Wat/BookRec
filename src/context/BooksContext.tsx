@@ -29,7 +29,8 @@ export type FormData = {
 };
 
 interface BooksContextType {
-  books: Book[];
+  books: Book[];        // ✅ เฉพาะหนังสือที่ไม่ได้ซ่อน (สำหรับหน้า user ทั่วไป)
+  allBooks: Book[];     // ✅ หนังสือทั้งหมด รวมที่ซ่อน (สำหรับ Admin)
   loading: boolean;
   rawPayload?: any;
   lastError?: any;
@@ -67,8 +68,6 @@ const TYPE_SLUG_MAP: Record<number, string> = {
    ✅ Map DB → UI
 ======================= */
 function mapRow(row: any): Book {
-  // ถ้ามี join book_type ให้ใช้ slug จาก relation ก่อน
-  // ถ้าไม่มี ค่อย fallback จาก type_id
   const resolvedType =
     row.book_type?.slug ??
     (typeof row.type_id === "number" ? TYPE_SLUG_MAP[row.type_id] : undefined) ??
@@ -81,33 +80,24 @@ function mapRow(row: any): Book {
     : [];
 
   return {
-    // ✅ id หลักของ frontend ให้ตรงกับ bookID เสมอ
     id: String(row.bookID ?? ""),
-    // ✅ เก็บ bookID แยกไว้ด้วยสำหรับ debug / recommendation mapping
     bookID: row.bookID ?? null,
-
     title: row.title ?? "",
     titleEn: row.titleEn ?? "",
     description: row.description ?? "",
     coverUrl: row.coverImage ?? "",
     publishDate: row.publishDate ?? "",
     slug: row.slug ?? "",
-
     authorName: row.author?.authorName ?? "",
     author: row.author?.authorName ?? "",
-
     publisher: row.publisher?.publisherName ?? "",
     publisherName: row.publisher?.publisherName ?? "",
-
-    // ✅ ต้องเป็น slug ไม่ใช่ "1" "2" "3"
     type: resolvedType,
-
     tags: resolvedTags,
     genres: resolvedTags,
-
     isNew: row.is_new ?? false,
     isPopular: row.is_popular ?? false,
-    isHidden: row.is_hidden ?? false, 
+    isHidden: row.is_hidden ?? false,
     rating: Number(row.rating ?? 0),
     reviewCount: Number(row.review_count ?? 0),
     price: Number(row.price ?? 0),
@@ -165,15 +155,11 @@ const findOrCreatePublisher = async (
 
   const { data: newPub, error: insertError } = (await supabase
     .from("publisher" as any)
-    .insert({
-      publisherName: name,
-      website: null,
-    })
+    .insert({ publisherName: name, website: null })
     .select("publisherID")
     .single()) as any;
 
   if (insertError) throw insertError;
-
   return newPub.publisherID;
 };
 
@@ -181,7 +167,6 @@ const findOrCreatePublisher = async (
    🔥 INSERT TAG RELATION
 ======================= */
 const insertTags = async (bookID: number, tags: string[]) => {
-  // กัน tag ซ้ำ เช่น ["โรแมนติก", "โรแมนติก"]
   const uniqueTags = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
 
   for (const tagName of uniqueTags) {
@@ -216,7 +201,8 @@ const updateTags = async (bookID: number, tags: string[]) => {
    ✅ Provider
 ======================= */
 export function BooksProvider({ children }: { children: ReactNode }) {
-  const [books, setBooks] = useState<Book[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);         // ✅ visible only
+  const [allBooks, setAllBooks] = useState<Book[]>([]);   // ✅ all including hidden
   const [loading, setLoading] = useState(true);
   const [rawPayload, setRawPayload] = useState<any>(null);
   const [lastError, setLastError] = useState<any>(null);
@@ -270,8 +256,6 @@ export function BooksProvider({ children }: { children: ReactNode }) {
       .order("bookID", { ascending: false })) as any;
 
     console.debug("RAW BOOK PAYLOAD:", data);
-    console.log("BOOK DATA:", data);
-    console.log("BOOK ERROR:", error);
 
     setRawPayload(data ?? null);
     setLastError(error ?? null);
@@ -279,21 +263,19 @@ export function BooksProvider({ children }: { children: ReactNode }) {
     if (error) {
       console.error("Fetch error:", error);
       setBooks([]);
+      setAllBooks([]);
     } else if (data) {
       try {
         const { data: stats, error: statsError } = (await supabase
           .from("book_interaction_stats" as any)
           .select("*")) as any;
-        
+
         if (statsError) {
           console.error("Stats fetch error:", statsError);
         }
 
         const statsMap = new Map(
-          (stats ?? []).map((s: any) => [
-            String(s.bookID), 
-            s,
-          ])
+          (stats ?? []).map((s: any) => [String(s.bookID), s])
         );
 
         const booksWithStats = data.map((row: any) => {
@@ -304,18 +286,22 @@ export function BooksProvider({ children }: { children: ReactNode }) {
             ...book,
             rating: Number(stat?.rating ?? book.rating ?? 0),
             reviewCount: Number(stat?.reviewCount ?? book.reviewCount ?? 0),
-
             favoriteCount: Number(stat?.favoriteCount ?? 0),
             reviewActionCount: Number(stat?.reviewActionCount ?? 0),
             viewCount: Number(stat?.viewCount ?? 0),
           };
         });
 
-        setBooks(booksWithStats);
+        // ✅ allBooks = ทั้งหมด (Admin ใช้)
+        setAllBooks(booksWithStats);
+
+        // ✅ books = กรองเฉพาะที่ไม่ซ่อน (หน้า user ทั่วไปใช้)
+        setBooks(booksWithStats.filter((b: Book) => !b.isHidden));
 
       } catch (e) {
         console.error("Mapping error:", e, data);
         setBooks([]);
+        setAllBooks([]);
       }
     }
 
@@ -324,10 +310,8 @@ export function BooksProvider({ children }: { children: ReactNode }) {
 
   const patchBook = useCallback(
     (id: string, patch: Partial<{ rating: number; reviewCount: number }>) => {
-      console.debug("patchBook called", { id, patch });
-
-      setBooks((prev) => {
-        const next = prev.map((b) =>
+      const applyPatch = (prev: Book[]) =>
+        prev.map((b) =>
           b.id === String(id)
             ? {
                 ...b,
@@ -339,12 +323,8 @@ export function BooksProvider({ children }: { children: ReactNode }) {
             : b
         );
 
-        console.debug(
-          "books after patch (sample)",
-          next.find((b) => b.id === String(id))
-        );
-        return next;
-      });
+      setBooks(applyPatch);
+      setAllBooks(applyPatch);
     },
     []
   );
@@ -360,26 +340,17 @@ export function BooksProvider({ children }: { children: ReactNode }) {
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "review" },
-          () => {
-            console.debug("Realtime: review changed, refetching books");
-            fetchBooks();
-          }
+          () => fetchBooks()
         )
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "books" },
-          () => {
-            console.debug("Realtime: books changed, refetching books");
-            fetchBooks();
-          }
+          () => fetchBooks()
         )
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "interaction" },
-          () => {
-            console.debug("Realtime: interaction changed, refetching books");
-            fetchBooks();
-          }
+          () => fetchBooks()
         )
         .subscribe();
 
@@ -423,6 +394,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
           type_id: book.type ? TYPE_ID_MAP[book.type] ?? null : null,
           is_new: book.isNew ?? false,
           is_popular: book.isPopular ?? false,
+          is_hidden: book.isHidden ?? false,
           rating: book.rating ?? 0,
           review_count: book.reviewCount ?? 0,
           price: book.price ?? 0,
@@ -519,6 +491,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
     <BooksContext.Provider
       value={{
         books,
+        allBooks,
         loading,
         rawPayload,
         lastError,

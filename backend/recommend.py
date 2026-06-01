@@ -47,12 +47,9 @@ def get_book_id(row):
 def action_weight(action):
     weights = {
         "favorite": 5.0,
-        "review": 4.5,
-        "rating": 4.0,
-        "search": 2.0,
-        "detail": 1.2,
-        "click": 1.0,
-        "view": 0.15,
+        "rating": 4.5,
+        "review": 3.5,
+        "view": 1.0,
     }
     return weights.get(str(action or "").lower(), 0.0)
 
