@@ -83,7 +83,7 @@ const AdminPage = () => {
   const [form, setForm] = useState<FormData>(emptyForm);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<string | null>(null);
-  const [unarchiveConfirm, setUnarchiveConfirm] = useState<string | null>(null); // ✅ เพิ่มใหม่
+  const [unarchiveConfirm, setUnarchiveConfirm] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [authors, setAuthors] = useState<string[]>([]);
   const [publishers, setPublishers] = useState<string[]>([]);
@@ -93,8 +93,14 @@ const AdminPage = () => {
   const [allReviews, setAllReviews] = useState<ReviewWithBook[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [reviewSearch, setReviewSearch] = useState("");
-
   const [userSubTab, setUserSubTab] = useState<"members" | "reviews">("members");
+
+  // ✅ Pagination รีวิว
+  const [reviewPage, setReviewPage] = useState(1);
+  const REVIEWS_PER_PAGE = 15;
+
+  // ✅ Confirm ลบรีวิว
+  const [deleteReviewConfirm, setDeleteReviewConfirm] = useState<number | null>(null);
 
   useEffect(() => {
     const map = new Map<number, boolean>();
@@ -180,10 +186,16 @@ const AdminPage = () => {
   const totalPages = Math.ceil(filtered.length / BOOKS_PER_PAGE);
   const paginatedBooks = filtered.slice((currentPage - 1) * BOOKS_PER_PAGE, currentPage * BOOKS_PER_PAGE);
 
+  // ✅ Reviews: filter + pagination
   const filteredReviews = allReviews.filter(r =>
     !reviewSearch ||
     r.book?.title?.toLowerCase().includes(reviewSearch.toLowerCase()) ||
     r.display_name?.toLowerCase().includes(reviewSearch.toLowerCase())
+  );
+  const totalReviewPages = Math.ceil(filteredReviews.length / REVIEWS_PER_PAGE);
+  const paginatedReviews = filteredReviews.slice(
+    (reviewPage - 1) * REVIEWS_PER_PAGE,
+    reviewPage * REVIEWS_PER_PAGE
   );
 
   const toggleGenre = (g: string) => setForm(prev => ({
@@ -239,7 +251,6 @@ const AdminPage = () => {
     }
   };
 
-  // ✅ ฟังก์ชันใหม่: ยกเลิกการซ่อนหนังสือ
   const handleUnhide = async (book: Book) => {
     try {
       await updateBook(book.id, {
@@ -252,6 +263,20 @@ const AdminPage = () => {
       });
       setUnarchiveConfirm(null);
       toast({ title: "ยกเลิกการซ่อนหนังสือสำเร็จ ✅" });
+    } catch (err: any) {
+      toast({ title: "เกิดข้อผิดพลาด", description: err?.message, variant: "destructive" });
+    }
+  };
+
+  // ✅ ลบรีวิว
+  const handleDeleteReview = async (reviewID: number) => {
+    try {
+      const db = supabase as any;
+      const { error } = await db.from("review").delete().eq("reviewID", reviewID);
+      if (error) throw error;
+      setAllReviews(prev => prev.filter(r => r.reviewID !== reviewID));
+      setDeleteReviewConfirm(null);
+      toast({ title: "ลบรีวิวสำเร็จ 🗑️" });
     } catch (err: any) {
       toast({ title: "เกิดข้อผิดพลาด", description: err?.message, variant: "destructive" });
     }
@@ -294,7 +319,6 @@ const AdminPage = () => {
       ══════════════════════════════════ */}
       {activeTab === "books" && (
         <>
-          {/* Toolbar */}
           <div className="mb-4 flex items-center justify-between">
             <p className="text-sm text-muted-foreground">ทั้งหมด {allBooks.length} เล่ม</p>
             <Button onClick={openAdd} className="gap-2">
@@ -302,7 +326,6 @@ const AdminPage = () => {
             </Button>
           </div>
 
-          {/* Status filter buttons */}
           <div className="mb-4 flex flex-wrap gap-2">
             {filterBtns.map(btn => (
               <button key={btn.key}
@@ -318,7 +341,6 @@ const AdminPage = () => {
             ))}
           </div>
 
-          {/* Search */}
           <div className="relative mb-6">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input value={search}
@@ -326,14 +348,12 @@ const AdminPage = () => {
               placeholder="ค้นหาชื่อหนังสือ..." className="pl-9" />
           </div>
 
-          {/* Legend */}
           <div className="mb-3 flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1"><Trash2 className="h-3.5 w-3.5 text-red-400" /> ลบได้ (ไม่มีข้อมูล)</span>
             <span className="flex items-center gap-1"><EyeOff className="h-3.5 w-3.5 text-amber-500" /> ซ่อน (มีรีวิว/ชื่นชอบ — ลบไม่ได้)</span>
             <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5 text-blue-500" /> ยกเลิกซ่อน</span>
           </div>
 
-          {/* Table */}
           <div className="rounded-xl border overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-secondary">
@@ -350,7 +370,6 @@ const AdminPage = () => {
                   const bookNumId = getBookId(book);
                   const hasInteraction = bookInteractions.get(bookNumId) ?? false;
                   const isHidden = book.isHidden ?? false;
-
                   return (
                     <tr key={book.id} className="border-t hover:bg-muted/30">
                       <td className="px-4 py-3">
@@ -382,17 +401,12 @@ const AdminPage = () => {
                           <Button size="icon" variant="ghost" onClick={() => openEdit(book)} title="แก้ไข">
                             <Pencil className="h-4 w-4" />
                           </Button>
-
-                          {/* ✅ แยก 3 กรณี: ซ่อนอยู่ / มีข้อมูล / ลบได้ */}
                           {isHidden ? (
-                            // กรณี: หนังสือซ่อนอยู่ → แสดงปุ่มยกเลิกซ่อน
                             unarchiveConfirm === book.id ? (
                               <>
                                 <Button size="sm" variant="outline"
                                   className="border-blue-300 text-blue-700 hover:bg-blue-50"
-                                  onClick={() => handleUnhide(book)}>
-                                  ยืนยันเปิดใช้
-                                </Button>
+                                  onClick={() => handleUnhide(book)}>ยืนยันเปิดใช้</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setUnarchiveConfirm(null)}>ยกเลิก</Button>
                               </>
                             ) : (
@@ -402,14 +416,11 @@ const AdminPage = () => {
                               </Button>
                             )
                           ) : hasInteraction ? (
-                            // กรณี: มีข้อมูล → ซ่อนได้ แต่ลบไม่ได้
                             archiveConfirm === book.id ? (
                               <>
                                 <Button size="sm" variant="outline"
                                   className="border-amber-300 text-amber-700 hover:bg-amber-50"
-                                  onClick={() => handleArchive(book)}>
-                                  ยืนยันซ่อน
-                                </Button>
+                                  onClick={() => handleArchive(book)}>ยืนยันซ่อน</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setArchiveConfirm(null)}>ยกเลิก</Button>
                               </>
                             ) : (
@@ -419,7 +430,6 @@ const AdminPage = () => {
                               </Button>
                             )
                           ) : (
-                            // กรณี: ไม่มีข้อมูล → ลบได้เลย
                             deleteConfirm === book.id ? (
                               <>
                                 <Button size="sm" variant="destructive" onClick={() => handleDelete(book.id)}>ยืนยัน</Button>
@@ -444,7 +454,6 @@ const AdminPage = () => {
             )}
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-center gap-2">
               <Button variant="outline" size="sm" disabled={currentPage === 1}
@@ -466,13 +475,12 @@ const AdminPage = () => {
             <div className="py-10 text-center text-muted-foreground animate-pulse">กำลังโหลดข้อมูล...</div>
           ) : (
             <>
-              {/* Summary cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { label: "ผู้ใช้ทั้งหมด",    value: users.length,                                        icon: Users,        color: "text-blue-500",   bg: "bg-blue-50" },
-                  { label: "รีวิวทั้งหมด",      value: allReviews.length,                                  icon: Star,         color: "text-amber-500",  bg: "bg-amber-50" },
-                  { label: "หนังสือที่มีรีวิว", value: new Set(allReviews.map(r => r.book?.bookID)).size,  icon: BookOpen,     color: "text-green-500",  bg: "bg-green-50" },
-                  { label: "Admin",              value: users.filter(u => u.role === "admin").length,       icon: MessageSquare,color: "text-purple-500", bg: "bg-purple-50" },
+                  { label: "ผู้ใช้ทั้งหมด",    value: users.length,                                        icon: Users,         color: "text-blue-500",   bg: "bg-blue-50" },
+                  { label: "รีวิวทั้งหมด",      value: allReviews.length,                                  icon: Star,          color: "text-amber-500",  bg: "bg-amber-50" },
+                  { label: "หนังสือที่มีรีวิว", value: new Set(allReviews.map(r => r.book?.bookID)).size,  icon: BookOpen,      color: "text-green-500",  bg: "bg-green-50" },
+                  { label: "Admin",              value: users.filter(u => u.role === "admin").length,       icon: MessageSquare, color: "text-purple-500", bg: "bg-purple-50" },
                 ].map(s => (
                   <div key={s.label} className="rounded-xl border bg-card p-4 shadow-sm">
                     <div className={`inline-flex rounded-lg p-2 ${s.bg} mb-2`}>
@@ -484,7 +492,6 @@ const AdminPage = () => {
                 ))}
               </div>
 
-              {/* Sub-tabs */}
               <div className="flex gap-1 border-b border-border">
                 {[
                   { key: "members", label: "👥 รายชื่อผู้ใช้", count: users.length },
@@ -502,7 +509,6 @@ const AdminPage = () => {
                 ))}
               </div>
 
-              {/* Sub-tab: รายชื่อผู้ใช้ */}
               {userSubTab === "members" && (
                 <div className="rounded-xl border overflow-hidden">
                   <table className="w-full text-sm">
@@ -541,16 +547,25 @@ const AdminPage = () => {
                 </div>
               )}
 
-              {/* Sub-tab: รีวิวทั้งหมด */}
               {userSubTab === "reviews" && (
                 <div>
-                  <div className="relative mb-4 w-full sm:w-72">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input value={reviewSearch} onChange={e => setReviewSearch(e.target.value)}
-                      placeholder="ค้นหาหนังสือหรือผู้ใช้..." className="pl-9 h-9 text-sm" />
+                  {/* Search bar + count */}
+                  <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="relative w-full sm:w-72">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={reviewSearch}
+                        onChange={e => { setReviewSearch(e.target.value); setReviewPage(1); }}
+                        placeholder="ค้นหาหนังสือหรือผู้ใช้..."
+                        className="pl-9 h-9 text-sm"
+                      />
+                    </div>
+                    <p className="text-sm text-muted-foreground">{filteredReviews.length} รายการ</p>
                   </div>
+
+                  {/* Review list */}
                   <div className="space-y-2">
-                    {filteredReviews.slice(0, 50).map(r => (
+                    {paginatedReviews.map(r => (
                       <div key={r.reviewID} className="flex gap-3 rounded-xl border bg-card p-3 items-start">
                         {r.book?.coverImage && (
                           <img src={r.book.coverImage} alt={r.book.title}
@@ -573,17 +588,80 @@ const AdminPage = () => {
                             {r.createdAt ? new Date(r.createdAt).toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" }) : ""}
                           </p>
                         </div>
+
+                        {/* ✅ ปุ่มลบรีวิว */}
+                        <div className="flex-shrink-0 flex items-center">
+                          {deleteReviewConfirm === r.reviewID ? (
+                            <div className="flex items-center gap-1">
+                              <Button size="sm" variant="destructive"
+                                onClick={() => handleDeleteReview(r.reviewID)}>
+                                ยืนยัน
+                              </Button>
+                              <Button size="sm" variant="ghost"
+                                onClick={() => setDeleteReviewConfirm(null)}>
+                                ยกเลิก
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button size="icon" variant="ghost" title="ลบรีวิว"
+                              onClick={() => setDeleteReviewConfirm(r.reviewID)}>
+                              <Trash2 className="h-4 w-4 text-red-400" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     ))}
+
                     {filteredReviews.length === 0 && (
                       <div className="py-10 text-center text-muted-foreground">ไม่พบรีวิว</div>
                     )}
-                    {filteredReviews.length > 50 && (
-                      <p className="text-center text-sm text-muted-foreground py-2">
-                        แสดง 50 / {filteredReviews.length} รายการ
-                      </p>
-                    )}
                   </div>
+
+                  {/* ✅ Pagination รีวิว */}
+                  {totalReviewPages > 1 && (
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <Button variant="outline" size="sm"
+                        disabled={reviewPage === 1}
+                        onClick={() => setReviewPage(p => p - 1)}>
+                        ก่อนหน้า
+                      </Button>
+                      <div className="flex gap-1">
+                        {Array.from({ length: totalReviewPages }, (_, i) => i + 1)
+                          .filter(p => p === 1 || p === totalReviewPages || Math.abs(p - reviewPage) <= 1)
+                          .reduce<(number | "...")[]>((acc, p, idx, arr) => {
+                            if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push("...");
+                            acc.push(p);
+                            return acc;
+                          }, [])
+                          .map((p, idx) =>
+                            p === "..." ? (
+                              <span key={`e-${idx}`} className="px-2 py-1 text-sm text-muted-foreground">...</span>
+                            ) : (
+                              <button key={p}
+                                onClick={() => setReviewPage(p as number)}
+                                className={`min-w-[32px] rounded-md px-2 py-1 text-sm transition-colors ${
+                                  reviewPage === p
+                                    ? "bg-primary text-white"
+                                    : "border border-border hover:bg-muted"
+                                }`}>
+                                {p}
+                              </button>
+                            )
+                          )}
+                      </div>
+                      <Button variant="outline" size="sm"
+                        disabled={reviewPage === totalReviewPages}
+                        onClick={() => setReviewPage(p => p + 1)}>
+                        ถัดไป
+                      </Button>
+                    </div>
+                  )}
+
+                  {filteredReviews.length > 0 && (
+                    <p className="mt-2 text-center text-xs text-muted-foreground">
+                      แสดง {(reviewPage - 1) * REVIEWS_PER_PAGE + 1}–{Math.min(reviewPage * REVIEWS_PER_PAGE, filteredReviews.length)} จาก {filteredReviews.length} รายการ
+                    </p>
+                  )}
                 </div>
               )}
             </>
