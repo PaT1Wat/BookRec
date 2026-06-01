@@ -23,7 +23,13 @@ const BookCard = ({ book }: BookCardProps) => {
   const viewCount         = Number((book as any).viewCount         ?? 0);
   const reviewCount       = Number(book.reviewCount ?? 0);
 
-  const hasStats = favoriteCount > 0 || reviewActionCount > 0 || viewCount > 0 || reviewCount > 0;
+  // ─── คะแนนที่แสดง: ถ้ามี rating จริงให้ใช้ ถ้าไม่มีให้คำนวณจาก favorite + review ───
+  const computedRating = Math.min(
+    5,
+    (favoriteCount * 5.0 + reviewActionCount * 4.5) /
+      Math.max(favoriteCount + reviewActionCount, 1)
+  );
+  const displayRating = (book.rating ?? 0) > 0 ? (book.rating ?? 0) : computedRating;
 
   const logInteraction = async (actionType: string) => {
     if (!user) return;
@@ -71,7 +77,7 @@ const BookCard = ({ book }: BookCardProps) => {
           </div>
 
           {/* BADGE ยอดนิยม / ใหม่ */}
-          <div className="absolute left-2 top-2 flex flex-col gap-1">
+          <div className="absolute left-2 top-2 flex flex-row gap-1">
             {book.isPopular && (
               <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-bold text-white shadow">
                 ยอดนิยม
@@ -120,12 +126,12 @@ const BookCard = ({ book }: BookCardProps) => {
           {book.authorName || book.author || "-"}
         </p>
 
-        {/* ⭐ Rating + ราคา — ลบ (reviewCount) ออกจากแถวนี้แล้ว */}
+        {/* ⭐ Rating + ราคา */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
             <div className="flex items-center gap-0.5">
               {Array.from({ length: 5 }).map((_, i) => {
-                const filled = i < Math.round(book.rating ?? 0);
+                const filled = i < Math.round(displayRating);
                 return (
                   <Star
                     key={i}
@@ -137,7 +143,7 @@ const BookCard = ({ book }: BookCardProps) => {
               })}
             </div>
             <span className="text-xs font-medium text-foreground">
-              {(book.rating ?? 0).toFixed(1)}
+              {displayRating.toFixed(1)}
             </span>
           </div>
 
@@ -146,32 +152,28 @@ const BookCard = ({ book }: BookCardProps) => {
           )}
         </div>
 
-        {/* ❤️💬👁️⭐ Interaction stats — ย้าย reviewCount มาไว้ที่นี่ */}
-        {hasStats && (
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5">
-            {favoriteCount > 0 && (
-              <span className="flex items-center gap-0.5">
-                <Heart className="h-2.5 w-2.5 fill-red-400 text-red-400" />
-                {favoriteCount}
-              </span>
-            )}
-            {reviewActionCount > 0 && (
-              <span className="flex items-center gap-0.5">
-                💬 {reviewActionCount}
-              </span>
-            )}
-            {viewCount > 0 && (
-              <span className="flex items-center gap-0.5">
-                👁️ {viewCount}
-              </span>
-            )}
-            {reviewCount > 0 && (
-              <span className="flex items-center gap-0.5">
-                ({reviewCount})
-              </span>
-            )}
-          </div>
-        )}
+        {/* ❤️💬👁️ Interaction stats + ผลรวม */}
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-0.5">
+          {favoriteCount > 0 && (
+            <span className="flex items-center gap-0.5">
+              <Heart className="h-2.5 w-2.5 fill-red-400 text-red-400" />
+              {favoriteCount}
+            </span>
+          )}
+          {reviewActionCount > 0 && (
+            <span className="flex items-center gap-0.5">
+              💬 {reviewActionCount}
+            </span>
+          )}
+          {viewCount > 0 && (
+            <span className="flex items-center gap-0.5">
+              👁️ {viewCount}
+            </span>
+          )}
+          <span className="flex items-center gap-0.5">
+            ({favoriteCount + reviewActionCount + viewCount})
+          </span>
+        </div>
 
         {/* TAGS */}
         {book.tags && book.tags.length > 0 && (

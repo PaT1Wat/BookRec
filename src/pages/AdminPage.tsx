@@ -182,6 +182,7 @@ const AdminPage = () => {
       : isHidden;
     return matchSearch && matchStatus;
   });
+  
 
   const totalPages = Math.ceil(filtered.length / BOOKS_PER_PAGE);
   const paginatedBooks = filtered.slice((currentPage - 1) * BOOKS_PER_PAGE, currentPage * BOOKS_PER_PAGE);
@@ -458,10 +459,35 @@ const AdminPage = () => {
             <div className="mt-4 flex items-center justify-center gap-2">
               <Button variant="outline" size="sm" disabled={currentPage === 1}
                 onClick={() => setCurrentPage(p => p - 1)}>ก่อนหน้า</Button>
-              <span className="px-3 py-1.5 text-sm text-muted-foreground">{currentPage} / {totalPages}</span>
+              <div className="flex gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                  .reduce<(number | "...")[]>((acc, p, idx, arr) => {
+                    if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push("...");
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, idx) =>
+                    p === "..." ? (
+                      <span key={`e-${idx}`} className="px-2 py-1 text-sm text-muted-foreground">...</span>
+                    ) : (
+                      <button key={p} onClick={() => setCurrentPage(p as number)}
+                        className={`min-w-[32px] rounded-md px-2 py-1 text-sm transition-colors ${
+                          currentPage === p ? "bg-primary text-white" : "border border-border hover:bg-muted"
+                        }`}>
+                        {p}
+                      </button>
+                    )
+                  )}
+              </div>
               <Button variant="outline" size="sm" disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage(p => p + 1)}>ถัดไป</Button>
             </div>
+          )}
+          {filtered.length > 0 && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              แสดง {(currentPage - 1) * BOOKS_PER_PAGE + 1}–{Math.min(currentPage * BOOKS_PER_PAGE, filtered.length)} จาก {filtered.length} รายการ
+            </p>
           )}
         </>
       )}

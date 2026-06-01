@@ -289,7 +289,14 @@ export function BooksProvider({ children }: { children: ReactNode }) {
             favoriteCount: Number(stat?.favoriteCount ?? 0),
             reviewActionCount: Number(stat?.reviewActionCount ?? 0),
             viewCount: Number(stat?.viewCount ?? 0),
+            interactionCount: Number(stat?.interactionCount ?? 0), // ✅ เพิ่ม interactionCount รวมทุก action
           };
+        });
+
+        booksWithStats.sort((a: any, b: any) => {
+          const dateA = new Date((a as any).updated_at ?? 0).getTime();
+          const dateB = new Date((b as any).updated_at ?? 0).getTime();
+          return dateB - dateA;
         });
 
         // ✅ allBooks = ทั้งหมด (Admin ใช้)

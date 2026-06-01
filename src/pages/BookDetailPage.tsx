@@ -26,7 +26,7 @@ type Review = {
 
 const BookDetailPage = () => {
   const { id } = useParams();
-  const navigate = useNavigate(); // ✅ เพิ่ม
+  const navigate = useNavigate();
 
   const { books = [], refetch: refetchBooks, patchBook } = useBooks();
   const { toggle, check } = useFavorites();
@@ -102,6 +102,7 @@ const BookDetailPage = () => {
   const updateBookRating = (reviewList: Review[]) => {
     if (!id) return;
 
+    // ✅ คะแนนเฉลี่ยจาก review เท่านั้น
     const avg = reviewList.length
       ? reviewList.reduce((sum, r) => sum + (r.rating ?? 0), 0) /
         reviewList.length
@@ -149,7 +150,7 @@ const BookDetailPage = () => {
       await refetchBooks();
 
       toast({ title: "ส่งความคิดเห็นสำเร็จ ✅" });
-      clearUserRecsCache(user.id); // ✅ trigger re-fetch recs อัตโนมัติ
+      clearUserRecsCache(user.id);
     } catch (err: any) {
       toast({
         title: "เกิดข้อผิดพลาด",
@@ -204,13 +205,17 @@ const BookDetailPage = () => {
   const genres = book.genres ?? [];
   const tags = book.tags ?? [];
 
+  // ✅ คะแนนเฉลี่ยจาก review เท่านั้น — ถ้ายังไม่มี review ใช้ค่าจาก DB
   const avgRating = reviews.length
     ? Number((reviews.reduce((s, r) => s + (r.rating ?? 0), 0) / reviews.length).toFixed(1))
     : Number(book.rating ?? 0);
 
-  const favoriteCount = Number((book as any).favoriteCount ?? 0);
+  const favoriteCount     = Number((book as any).favoriteCount     ?? 0);
   const reviewActionCount = Number((book as any).reviewActionCount ?? 0);
-  const viewCount = Number((book as any).viewCount ?? 0);
+  const viewCount         = Number((book as any).viewCount         ?? 0);
+
+  // ✅ interactions รวมทั้งหมด
+  const totalInteractions = favoriteCount + reviewActionCount + viewCount;
 
   const relatedBooks = books
     .filter((b) => String(b.id ?? b.bookID) !== String(book.id ?? book.bookID))
@@ -230,7 +235,6 @@ const BookDetailPage = () => {
 
   return (
     <div className="container py-8">
-      {/* ✅ ใช้ navigate(-1) กลับไปหน้าก่อนหน้า (search หรือ หน้าแรก) */}
       <button
         onClick={() => navigate(-1)}
         className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
@@ -283,6 +287,7 @@ const BookDetailPage = () => {
             )}
           </div>
 
+          {/* ⭐ ดาว — คำนวณจาก review เท่านั้น */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -301,15 +306,21 @@ const BookDetailPage = () => {
               {avgRating.toFixed(1)}
             </span>
 
+            {reviews.length > 0 && (
+              <span className="text-sm text-muted-foreground">
+                ({reviews.length} รีวิว)
+              </span>
+            )}
           </div>
 
+          {/* 🔥 Interactions รวม */}
           <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
             <span>❤️ Favorite: {favoriteCount}</span>
             <span>💬 Review: {reviewActionCount}</span>
             <span>👁️ View: {viewCount}</span>
-            <span>( {favoriteCount + reviewActionCount + viewCount} interactions )</span>
-
-
+            <span className="font-medium text-foreground">
+              🔥 {totalInteractions} interactions
+            </span>
           </div>
 
           <div className="text-2xl font-bold text-primary">฿{book.price ?? 0}</div>
@@ -357,12 +368,7 @@ const BookDetailPage = () => {
               ))}
 
               {tags.map((t) => (
-                <span
-                  key={t}
-                  
-                >
-                 
-                </span>
+                <span key={t} />
               ))}
             </div>
           </div>

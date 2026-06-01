@@ -8,6 +8,15 @@ import { useFavorites } from "@/lib/favorites";
 
 const TARGET_COUNT = 12;
 
+// ✅ helper: คำนวณ interactions รวมของหนังสือ 1 เล่ม
+const getInteractionScore = (b: any): number => {
+  return (
+    Number((b as any).favoriteCount     ?? 0) +
+    Number((b as any).reviewActionCount ?? 0) +
+    Number((b as any).viewCount         ?? 0)
+  );
+};
+
 export default function RecommendationSection() {
   const { user } = useAuth();
   const { books } = useBooks();
@@ -86,6 +95,7 @@ export default function RecommendationSection() {
 
       const used = new Set<string>();
 
+      // ✅ เรียงตาม interactions รวม แทน rating
       const pickBooks = (targetTags: string[], count: number): Book[] => {
         if (targetTags.length === 0) return [];
         const result = books
@@ -95,8 +105,9 @@ export default function RecommendationSection() {
             return getTags(b).some((t: string) => targetTags.includes(t));
           })
           .sort((a: any, b: any) => {
-            const d = Number(b.rating ?? 0) - Number(a.rating ?? 0);
-            return d !== 0 ? d : Number(b.reviewCount ?? 0) - Number(a.reviewCount ?? 0);
+            // ✅ เรียงตาม interactions รวม ก่อน แล้วค่อย reviewCount เป็น tiebreaker
+            const diff = getInteractionScore(b) - getInteractionScore(a);
+            return diff !== 0 ? diff : Number(b.reviewCount ?? 0) - Number(a.reviewCount ?? 0);
           })
           .slice(0, count);
         result.forEach((b: any) => used.add(String(b.bookID ?? b.id)));
@@ -114,7 +125,8 @@ export default function RecommendationSection() {
         if (poolA.length === 0 || poolB.length === 0) {
           const fallback = books
             .filter((b: any) => !used.has(String(b.bookID ?? b.id)) && !favoriteSet.has(String(b.bookID ?? b.id)))
-            .sort((a: any, b: any) => Number(b.rating ?? 0) - Number(a.rating ?? 0))
+            // ✅ fallback ก็เรียงตาม interactions รวม
+            .sort((a: any, b: any) => getInteractionScore(b) - getInteractionScore(a))
             .slice(0, TARGET_COUNT - poolA.length - poolB.length);
           finalBooks = [...poolA, ...poolB, ...fallback].slice(0, TARGET_COUNT);
         } else {
@@ -124,11 +136,12 @@ export default function RecommendationSection() {
         // ✅ ไม่มี interaction → 12 จาก profile tags
         finalBooks = pickBooks(profileTags, TARGET_COUNT);
 
-        // ถ้าไม่มีแท็กเลย → global popular
+        // ถ้าไม่มีแท็กเลย → global popular by interactions
         if (finalBooks.length === 0) {
           finalBooks = [...books]
             .filter((b: any) => !favoriteSet.has(String(b.bookID ?? b.id)))
-            .sort((a: any, b: any) => Number(b.rating ?? 0) - Number(a.rating ?? 0))
+            // ✅ เรียงตาม interactions รวม
+            .sort((a: any, b: any) => getInteractionScore(b) - getInteractionScore(a))
             .slice(0, TARGET_COUNT);
         }
       }
