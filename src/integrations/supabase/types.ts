@@ -65,6 +65,7 @@ export type Database = {
           description: string | null
           is_new: boolean | null
           is_popular: boolean | null
+          is_hidden?: boolean | null 
           price: number | null
           publishDate: string | null
           publisherID: number | null
@@ -84,6 +85,7 @@ export type Database = {
           description?: string | null
           is_new?: boolean | null
           is_popular?: boolean | null
+          is_hidden?: boolean | null 
           price?: number | null
           publishDate?: string | null
           publisherID?: number | null
@@ -103,6 +105,7 @@ export type Database = {
           description?: string | null
           is_new?: boolean | null
           is_popular?: boolean | null
+          is_hidden?: boolean | null 
           price?: number | null
           publishDate?: string | null
           publisherID?: number | null

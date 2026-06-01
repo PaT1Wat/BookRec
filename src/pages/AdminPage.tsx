@@ -95,20 +95,21 @@ const AdminPage = () => {
 
   const [userSubTab, setUserSubTab] = useState<"members" | "reviews">("members");
 
+  // ✅ ใช้ stats จาก books context (book_interaction_stats view) แทน fetch แยก
+  // เพราะ fetch แยกจะเจอปัญหา RLS — admin เห็นแค่ interaction ของตัวเอง
+  // book_interaction_stats aggregate จากทุก user ไม่มีปัญหา RLS
   useEffect(() => {
-    const fetchInteractions = async () => {
-      const db = supabase as any;
-      const [{ data: reviews }, { data: favorites }, { data: interactions }] = await Promise.all([
-        db.from("review").select("bookID"),
-        db.from("favorite").select("bookID"),
-        db.from("interaction").select("bookID"),
-      ]);
-      const map = new Map<number, boolean>();
-      const addIds = (rows: any[]) => rows?.forEach((r: any) => { if (r.bookID) map.set(r.bookID, true); });
-      addIds(reviews ?? []); addIds(favorites ?? []); addIds(interactions ?? []);
-      setBookInteractions(map);
-    };
-    fetchInteractions();
+    const map = new Map<number, boolean>();
+    books.forEach((book: any) => {
+      const bookId = Number(book.bookID ?? book.id);
+      const hasData =
+        (book.favoriteCount ?? 0) > 0 ||
+        (book.reviewActionCount ?? 0) > 0 ||
+        (book.viewCount ?? 0) > 0 ||
+        (book.reviewCount ?? 0) > 0;
+      if (hasData) map.set(bookId, true);
+    });
+    setBookInteractions(map);
   }, [books]);
 
   useEffect(() => {
@@ -230,6 +231,7 @@ const AdminPage = () => {
         coverUrl: book.coverUrl, authorName: book.authorName || book.author,
         publisherName: book.publisherName || book.publisher, price: book.price,
         rating: 0, reviewCount: 0, type: book.type, tags: book.tags, isNew: false, isPopular: false,
+        isHidden: true,  // ✅ ซ่อนหนังสือ
       });
       setArchiveConfirm(null);
       toast({ title: "ซ่อนหนังสือสำเร็จ 👁️" });
@@ -309,7 +311,7 @@ const AdminPage = () => {
 
           {/* Legend */}
           <div className="mb-3 flex items-center gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1"><Trash2 className="h-3.5 w-3.5 text-red-400" /> ลบได้ (ไม่มีข้อมูลผูกพัน)</span>
+            <span className="flex items-center gap-1"><Trash2 className="h-3.5 w-3.5 text-red-400" /> ลบได้ (ไม่มีข้อมูล)</span>
             <span className="flex items-center gap-1"><EyeOff className="h-3.5 w-3.5 text-amber-500" /> ซ่อน (มีรีวิว/ชื่นชอบ — ลบไม่ได้)</span>
           </div>
 
@@ -345,7 +347,7 @@ const AdminPage = () => {
                       <td className="px-4 py-3 text-center">
                         {hasInteraction ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 border border-amber-200">
-                            <AlertTriangle className="h-3 w-3" /> มีข้อมูลผูกพัน
+                            <AlertTriangle className="h-3 w-3" /> มีข้อมูล
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 border border-green-200">
@@ -622,7 +624,13 @@ const AdminPage = () => {
                   placeholder="เรื่องย่อ..." rows={3}
                   className="w-full border rounded-md p-2 text-sm min-h-[80px] resize-y" />
               </div>
-              
+              <div className="flex gap-6">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={form.isNew}
+                    onChange={e => setForm({ ...form, isNew: e.target.checked })} className="rounded" />
+                  มาใหม่
+                </label>
+              </div>
             </div>
             <div className="flex justify-end gap-2 p-6 border-t sticky bottom-0 bg-white">
               <Button variant="outline" onClick={() => setShowForm(false)}>ยกเลิก</Button>

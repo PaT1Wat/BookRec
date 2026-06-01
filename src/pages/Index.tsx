@@ -1,34 +1,34 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useBooks } from "@/context/BooksContext";
 import HeroSection from "@/components/HeroSection";
 import BookSection from "@/components/BookSection";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useFavorites } from "@/lib/favorites";
+
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 const RECOMMEND_LIMIT = 12;
 const POOL_SIZE = 6;
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
 const GENRE_MAP: Record<string, string> = {
-  "แฟนตาซี": "แฟนตาซี",
-  "โรแมนติก": "โรแมนติก",
-  "แอ็กชัน": "แอ็กชัน",
-  "คอมเมดี้": "คอมเมดี้",
-  "ดราม่า": "ดราม่า",
-  "สืบสวน": "สืบสวน",
-  "สยองขวัญ": "สยองขวัญ",
-  "ชีวิตประจำวัน": "ชีวิตประจำวัน",
-  "ผจญภัย": "ผจญภัย",
-  "เหนือธรรมชาติ": "ไซไฟ",
-  "BL ( Boy Love )": "BL ( Boy Love )",
-  "GL ( Girl Love )": "GL ( Girl Love )",
+  "แฟนตาซี": "แฟนตาซี", "โรแมนติก": "โรแมนติก", "แอ็กชัน": "แอ็กชัน",
+  "คอมเมดี้": "คอมเมดี้", "ดราม่า": "ดราม่า", "สืบสวน": "สืบสวน",
+  "สยองขวัญ": "สยองขวัญ", "ชีวิตประจำวัน": "ชีวิตประจำวัน", "ผจญภัย": "ผจญภัย",
+  "เหนือธรรมชาติ": "ไซไฟ", "BL ( Boy Love )": "BL ( Boy Love )", "GL ( Girl Love )": "GL ( Girl Love )",
 };
 const GENRE_LABELS = Object.keys(GENRE_MAP);
 
 // ─── cache helpers ─────────────────────────────────────────────────────────────
-function getCacheKey(userId: string | undefined, genres: string[], prefGenres: string[] = []) {
+// ✅ รวม hasInteractions เข้า key → เมื่อสถานะ interaction เปลี่ยน key เปลี่ยน = cache miss
+function getCacheKey(
+  userId: string | undefined,
+  genres: string[],
+  prefGenres: string[],
+  hasInteractions: boolean
+) {
   const sortedPref = [...prefGenres].sort().join(",");
-  return `recs:${userId ?? "guest"}:${genres.join(",")}:${sortedPref}`;
+  return `recs:${userId ?? "guest"}:${genres.join(",")}:${sortedPref}:${hasInteractions ? "1" : "0"}`;
 }
 function loadCachedIds(key: string): string[] | null {
   try {
@@ -63,15 +63,13 @@ const RecommendSkeleton = () => (
   </section>
 );
 
-// ─── sort helpers ──────────────────────────────────────────────────────────────
+// ─── sort / score helpers ──────────────────────────────────────────────────────
 const sortByRating = (list: any[]) =>
   [...list].sort((a, b) => {
-    const ratingDiff = (b.rating ?? 0) - (a.rating ?? 0);
-    if (ratingDiff !== 0) return ratingDiff;
-    return (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+    const d = (b.rating ?? 0) - (a.rating ?? 0);
+    return d !== 0 ? d : (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
   });
 
-// คะแนน popularity จาก interaction ของผู้ใช้คนอื่น
 const interactionScore = (b: any) =>
   (b.favoriteCount ?? 0) * 5.0 +
   (b.reviewActionCount ?? 0) * 4.5 +
@@ -88,45 +86,69 @@ const Index = () => {
     () => new Set((favorites || []).map((id: any) => String(id))),
     [favorites]
   );
+
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [preferredGenres, setPreferredGenres] = useState<string[]>([]);
   const [prefGenresReady, setPrefGenresReady] = useState(false);
+
+  // ✅ FIX: เก็บ interactedIds เป็น state แยก fetch ก่อน สร้าง cache key
+  const [interactedIds, setInteractedIds] = useState<Set<string>>(new Set());
+  const [interactionsReady, setInteractionsReady] = useState(false);
+
   const dbGenres = selectedGenres.map((g) => GENRE_MAP[g]).filter(Boolean);
   const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
   const [recsReady, setRecsReady] = useState(false);
   const fetchedKeyRef = useRef<string | null>(null);
   const fetchSeqRef = useRef(0);
 
-  // ─── Load profile genre tags ────────────────────────────────────────────────
-  useEffect(() => {
+  // ─── fetch interactions (favorites + reviews) ──────────────────────────────
+  const fetchInteractions = useCallback(async () => {
     if (!user) {
-      setPreferredGenres([]);
-      setPrefGenresReady(true);
+      setInteractedIds(new Set());
+      setInteractionsReady(true);
       return;
     }
-    setPrefGenresReady(false);
-    const run = async () => {
-      const { data } = await supabase
-        .from("user_tags")
-        .select(`tagID, tag:tagID (tagName, tagType)`)
-        .eq("user_id", user.id);
-      setPreferredGenres(
-        data
-          ?.filter((i: any) => i.tag?.tagType === "genre")
-          .map((i: any) => i.tag?.tagName)
-          .filter(Boolean) ?? []
-      );
-      setPrefGenresReady(true);
-    };
-    run();
+    setInteractionsReady(false);
+    const [{ data: favData }, { data: revData }] = await Promise.all([
+      (supabase as any).from("favorite").select("bookID").eq("user_id", user.id),
+      (supabase as any).from("review").select("bookID").eq("user_id", user.id),
+    ]);
+    setInteractedIds(new Set([
+      ...(favData ?? []).map((f: any) => String(f.bookID)),
+      ...(revData ?? []).map((r: any) => String(r.bookID)),
+    ]));
+    setInteractionsReady(true);
   }, [user?.id]);
 
-  // ─── ฟัง recs:invalidate จาก ProfilePage ───────────────────────────────────
+  useEffect(() => {
+    fetchInteractions();
+  }, [fetchInteractions]);
+
+  // ─── Load profile genre tags ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user) { setPreferredGenres([]); setPrefGenresReady(true); return; }
+    setPrefGenresReady(false);
+    supabase
+      .from("user_tags")
+      .select(`tagID, tag:tagID (tagName, tagType)`)
+      .eq("user_id", user.id)
+      .then(({ data }) => {
+        setPreferredGenres(
+          data?.filter((i: any) => i.tag?.tagType === "genre")
+            .map((i: any) => i.tag?.tagName).filter(Boolean) ?? []
+        );
+        setPrefGenresReady(true);
+      });
+  }, [user?.id]);
+
+  // ─── ฟัง recs:invalidate → re-fetch interactions + reset ref ───────────────
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (user?.id && detail?.userId !== user.id) return;
-      fetchedKeyRef.current = null;
+      fetchedKeyRef.current = null; // บังคับ re-fetch
+      fetchInteractions();          // โหลด interactions ใหม่
+      // โหลด prefGenres ใหม่ด้วย
       setPrefGenresReady(false);
       if (user?.id) {
         supabase
@@ -135,10 +157,8 @@ const Index = () => {
           .eq("user_id", user.id)
           .then(({ data }) => {
             setPreferredGenres(
-              data
-                ?.filter((i: any) => i.tag?.tagType === "genre")
-                .map((i: any) => i.tag?.tagName)
-                .filter(Boolean) ?? []
+              data?.filter((i: any) => i.tag?.tagType === "genre")
+                .map((i: any) => i.tag?.tagName).filter(Boolean) ?? []
             );
             setPrefGenresReady(true);
           });
@@ -148,9 +168,12 @@ const Index = () => {
     };
     window.addEventListener("recs:invalidate", handler);
     return () => window.removeEventListener("recs:invalidate", handler);
-  }, [user?.id]);
+  }, [user?.id, fetchInteractions]);
 
   // ─── helpers ────────────────────────────────────────────────────────────────
+  // ✅ กรองหนังสือที่ซ่อนออกก่อนเสมอ
+  const visibleBooks = books.filter((b) => !(b as any).isHidden);
+
   const filterByGenre = (list: typeof books) =>
     dbGenres.length > 0
       ? list.filter((b) => {
@@ -161,25 +184,23 @@ const Index = () => {
 
   // ─── buildLocalIds ──────────────────────────────────────────────────────────
   /**
-   * กรณีที่ 1 — ยังไม่มี interaction เลย:
-   *   → แนะนำ 12 เรื่องจากแท็กที่เลือกในโปรไฟล์ (prefGenres)
-   *   → เรียงตาม interactionScore ของผู้ใช้คนอื่น (เล่มที่ popular ขึ้นก่อน)
-   *   → ถ้าไม่มีแท็กเลย → global popular
+   * กรณีที่ 1 (interactedIds ว่าง) → แนะนำ 12 เรื่องจาก profile tags
+   *   เรียงตาม interactionScore ของผู้ใช้คนอื่น
    *
-   * กรณีที่ 2 — มี interaction แล้ว (favorite หรือ review):
-   *   → Pool A (6 เรื่อง): จาก prefGenres เรียงตาม interactionScore
-   *   → Pool B (6 เรื่อง): คล้ายกับเล่มที่ user เคย interact
-   *                         เรียงตาม tag-overlap → interactionScore
+   * กรณีที่ 2 (มี interaction แล้ว) → 6 + 6
+   *   Pool A (6): จาก profile tags เรียงตาม popularity
+   *   Pool B (6): คล้ายกับเล่มที่ user เคย interact เรียงตาม tag-overlap → popularity
    */
   const buildLocalIds = (
     booksRef: typeof books,
     favSet: Set<string>,
     prefGenres: string[],
     targetGenres: string[],
-    interactedIds: Set<string>
+    interacted: Set<string>
   ): string[] => {
     const getId = (b: any) => String((b as any).bookID ?? b.id);
-    const isExcluded = (id: string) => favSet.has(id) || interactedIds.has(id);
+    const isHidden = (b: any) => !!(b as any).isHidden;
+    const isExcluded = (id: string) => favSet.has(id) || interacted.has(id);
 
     // ── กด genre filter บน homepage ──────────────────────────────────────────
     if (targetGenres.length > 0) {
@@ -196,10 +217,10 @@ const Index = () => {
         .map(getId);
     }
 
-    // ── กรณีที่ 1: ยังไม่มี interaction เลย ──────────────────────────────────
-    if (interactedIds.size === 0) {
+    console.log("[REC] buildLocalIds →", { interactedSize: interacted.size, prefGenres });
+    // ── กรณีที่ 1: ยังไม่มี interaction เลย → 12 จาก profile tags ───────────
+    if (interacted.size === 0) {
       if (prefGenres.length > 0) {
-        // แนะนำ 12 เรื่องจาก profile tags เรียงตาม popularity ของผู้ใช้อื่น
         const prefLower = prefGenres.map(g => g.toLowerCase());
         const result = [...booksRef]
           .filter(b => {
@@ -221,7 +242,7 @@ const Index = () => {
         .map(getId);
     }
 
-    // ── กรณีที่ 2: มี interaction แล้ว → 6 + 6 ───────────────────────────────
+    // ── กรณีที่ 2: มี interaction → Pool A (6) + Pool B (6) ─────────────────
     const used = new Set<string>();
 
     // Pool A: profile tags × popularity ของผู้ใช้อื่น
@@ -243,7 +264,7 @@ const Index = () => {
 
     // Pool B: tag similarity จากเล่มที่ user เคย interact × popularity
     const interactedTagSet = new Set<string>();
-    interactedIds.forEach(id => {
+    interacted.forEach(id => {
       const book = booksRef.find(b => getId(b) === id);
       if (book) {
         (book.tags ?? book.genres ?? []).forEach((t: string) =>
@@ -262,13 +283,11 @@ const Index = () => {
           return bg.some(t => interactedTagSet.has(t));
         })
         .sort((a, b) => {
-          // primary: tag overlap มากที่สุดก่อน
           const bgA = (a.genres ?? a.tags ?? []).map((t: string) => t.toLowerCase());
           const bgB = (b.genres ?? b.tags ?? []).map((t: string) => t.toLowerCase());
           const overlapA = bgA.filter(t => interactedTagSet.has(t)).length;
           const overlapB = bgB.filter(t => interactedTagSet.has(t)).length;
           if (overlapB !== overlapA) return overlapB - overlapA;
-          // secondary: popularity ของผู้ใช้อื่น
           return interactionScore(b) - interactionScore(a);
         })
         .slice(0, POOL_SIZE)
@@ -279,10 +298,7 @@ const Index = () => {
     // เติม pool ที่ยังว่างด้วย global popular
     const fillGlobal = (exclude: Set<string>, size: number): string[] =>
       [...booksRef]
-        .filter(b => {
-          const id = getId(b);
-          return !isExcluded(id) && !exclude.has(id);
-        })
+        .filter(b => { const id = getId(b); return !isExcluded(id) && !exclude.has(id); })
         .sort((a, b) => interactionScore(b) - interactionScore(a))
         .slice(0, size)
         .map(getId);
@@ -296,44 +312,16 @@ const Index = () => {
     return [...poolA, ...poolB].slice(0, RECOMMEND_LIMIT);
   };
 
-  // ─── core fetch ─────────────────────────────────────────────────────────────
+  // ─── core fetch (local 6+6 logic) ─────────────────────────────────────────
+  // ใช้ local logic ล้วนๆ เพราะ backend filter ด้วย preferred genres ทำให้ได้ 12 จาก profile tags
   const doFetch = async (
     booksRef: typeof books,
     favSet: Set<string>,
     prefGenres: string[],
-    genresForFetch: string[]
+    genresForFetch: string[],
+    interacted: Set<string>
   ): Promise<string[]> => {
-    const [{ data: favData }, { data: revData }] = user
-      ? await Promise.all([
-          supabase.from("favorite").select("bookID").eq("user_id", user.id),
-          supabase.from("review").select("bookID").eq("user_id", user.id),
-        ])
-      : [{ data: null }, { data: null }];
-
-    const interactedIds = new Set([
-      ...(favData ?? []).map((f: any) => String(f.bookID)),
-      ...(revData ?? []).map((r: any) => String(r.bookID)),
-    ]);
-
-    // ลอง backend ถ้า user มี interaction
-    if (user && interactedIds.size > 0) {
-      const param =
-        genresForFetch.length > 0
-          ? `?genre=${encodeURIComponent(genresForFetch.join(","))}`
-          : "";
-      try {
-        const resp = await fetch(`${BACKEND_URL}/recommend/${user.id}${param}`);
-        if (resp.ok) {
-          const json = await resp.json();
-          const ids = (json.bookIDs || []).map(String);
-          if (ids.length > 0) return ids;
-        }
-      } catch {
-        // Backend unavailable → fall through to local
-      }
-    }
-
-    return buildLocalIds(booksRef, favSet, prefGenres, genresForFetch, interactedIds);
+    return buildLocalIds(booksRef, favSet, prefGenres, genresForFetch, interacted);
   };
 
   // ─── apply ids ──────────────────────────────────────────────────────────────
@@ -342,7 +330,8 @@ const Index = () => {
     targetDbGenres: string[],
     booksRef: typeof books,
     favSet: Set<string>,
-    prefGenres: string[]
+    prefGenres: string[],
+    interacted: Set<string>
   ) => {
     const cached = loadCachedIds(cacheKey);
     if (cached && cached.length > 0) {
@@ -350,10 +339,11 @@ const Index = () => {
       setRecsReady(true);
       return;
     }
+    console.log("[REC] doFetch →", { cacheKey, interactedSize: interacted.size, prefGenres });
     const seq = ++fetchSeqRef.current;
     setRecsReady(false);
     try {
-      const ids = await doFetch(booksRef, favSet, prefGenres, targetDbGenres);
+      const ids = await doFetch(booksRef, favSet, prefGenres, targetDbGenres, interacted);
       if (seq !== fetchSeqRef.current) return;
       saveCachedIds(cacheKey, ids);
       setRecommendedIds(ids);
@@ -367,31 +357,38 @@ const Index = () => {
 
   // ─── main effect ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (authLoading || !prefGenresReady) return;
+    if (authLoading || !prefGenresReady || !interactionsReady) return;
     if (books.length === 0) return;
-    const cacheKey = getCacheKey(user?.id, dbGenres, preferredGenres);
+    // ✅ hasInteractions เข้า cache key → key เปลี่ยนเมื่อ interaction state เปลี่ยน
+    const hasInteractions = interactedIds.size > 0;
+    console.log("[REC] main effect →", { hasInteractions, interactedSize: interactedIds.size, prefGenres: preferredGenres, cacheKey: getCacheKey(user?.id, dbGenres, preferredGenres, hasInteractions) });
+    const cacheKey = getCacheKey(user?.id, dbGenres, preferredGenres, hasInteractions);
     if (fetchedKeyRef.current === cacheKey) return;
     fetchedKeyRef.current = cacheKey;
-    applyIds(cacheKey, dbGenres, books, favoriteSet as Set<string>, preferredGenres);
+    applyIds(cacheKey, dbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, prefGenresReady, user?.id, books.length, dbGenres.join(","), preferredGenres.join(",")]);
+  }, [
+    authLoading, prefGenresReady, interactionsReady,
+    interactedIds.size,           // ← re-run เมื่อ interaction เพิ่ม/ลด
+    user?.id, books.length,
+    dbGenres.join(","), preferredGenres.join(","),
+  ]);
 
   // ─── genre click ────────────────────────────────────────────────────────────
   const handleGenreClick = (genre: string | null) => {
     if (authLoading || books.length === 0) return;
     const nextGenres =
-      genre === null
-        ? []
-        : selectedGenres.includes(genre)
-        ? selectedGenres.filter((g) => g !== genre)
-        : selectedGenres.length >= 3
-        ? selectedGenres
-        : [...selectedGenres, genre];
+      genre === null ? []
+      : selectedGenres.includes(genre) ? selectedGenres.filter((g) => g !== genre)
+      : selectedGenres.length >= 3 ? selectedGenres
+      : [...selectedGenres, genre];
     const nextDbGenres = nextGenres.map((g) => GENRE_MAP[g]).filter(Boolean);
-    const cacheKey = getCacheKey(user?.id, nextDbGenres, preferredGenres);
+    const hasInteractions = interactedIds.size > 0;
+    console.log("[REC] main effect →", { hasInteractions, interactedSize: interactedIds.size, prefGenres: preferredGenres, cacheKey: getCacheKey(user?.id, dbGenres, preferredGenres, hasInteractions) });
+    const cacheKey = getCacheKey(user?.id, nextDbGenres, preferredGenres, hasInteractions);
     fetchedKeyRef.current = cacheKey;
     setSelectedGenres(nextGenres);
-    applyIds(cacheKey, nextDbGenres, books, favoriteSet as Set<string>, preferredGenres);
+    applyIds(cacheKey, nextDbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds);
   };
 
   // ─── derived lists ──────────────────────────────────────────────────────────
@@ -408,28 +405,26 @@ const Index = () => {
       books
         .filter((b) => b.isPopular)
         .filter((b) => !favoriteSet.has(String((b as any).bookID ?? b.id)))
-        .filter((b) =>
-          dbGenres.length > 0
-            ? dbGenres.every((g) => ((b.genres ?? b.tags ?? []) as string[]).includes(g))
-            : true
+        .filter((b) => dbGenres.length > 0
+          ? dbGenres.every((g) => ((b.genres ?? b.tags ?? []) as string[]).includes(g))
+          : true
         )
     ).slice(0, RECOMMEND_LIMIT);
   }, [recommendedIds, books, dbGenres, favoriteSet]);
 
   const popularBooks = filterByGenre(
-    [...books]
+    [...visibleBooks]
       .filter((b) => (b.reviewCount ?? 0) >= 1)
       .sort((a, b) => {
-        const ratingDiff = (b.rating ?? 0) - (a.rating ?? 0);
-        if (ratingDiff !== 0) return ratingDiff;
-        return (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+        const d = (b.rating ?? 0) - (a.rating ?? 0);
+        return d !== 0 ? d : (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
       })
       .slice(0, 12)
   );
 
   const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
   const newBooks = filterByGenre(
-    [...books]
+    [...visibleBooks]
       .filter((b) => {
         if (b.publishDate) return Date.now() - new Date(b.publishDate).getTime() <= ONE_MONTH_MS;
         return b.isNew === true;
@@ -442,9 +437,9 @@ const Index = () => {
       .slice(0, 12)
   );
 
-  const mangaBooks = filterByGenre(books.filter((b) => b.type === "manga")).slice(0, 12);
-  const novelBooks = filterByGenre(books.filter((b) => b.type === "novel")).slice(0, 12);
-  const lightNovelBooks = filterByGenre(books.filter((b) => b.type === "light-novel")).slice(0, 12);
+  const mangaBooks = filterByGenre(visibleBooks.filter((b) => b.type === "manga")).slice(0, 12);
+  const novelBooks = filterByGenre(visibleBooks.filter((b) => b.type === "novel")).slice(0, 12);
+  const lightNovelBooks = filterByGenre(visibleBooks.filter((b) => b.type === "light-novel")).slice(0, 12);
 
   // ─── render ─────────────────────────────────────────────────────────────────
   return (
@@ -470,9 +465,7 @@ const Index = () => {
             ทั้งหมด
           </button>
           {GENRE_LABELS.map((g) => (
-            <button
-              key={g}
-              onClick={() => handleGenreClick(g)}
+            <button key={g} onClick={() => handleGenreClick(g)}
               className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
                 selectedGenres.includes(g)
                   ? "bg-primary text-primary-foreground border-primary"
@@ -485,7 +478,7 @@ const Index = () => {
         </div>
 
         {/* Recommended section */}
-        {authLoading || !prefGenresReady || !recsReady ? (
+        {authLoading || !prefGenresReady || !interactionsReady || !recsReady ? (
           <RecommendSkeleton />
         ) : (
           <>
@@ -516,18 +509,12 @@ const Index = () => {
         )}
 
         {selectedGenres.length === 0 && popularBooks.length > 0 && (
-          <BookSection
-            title="🔥 ยอดนิยม"
-            subtitle="หนังสือที่ได้รับความนิยมสูงสุด"
-            books={popularBooks.map((b) => ({ ...b, isPopular: true, isNew: false }))}
-          />
+          <BookSection title="🔥 ยอดนิยม" subtitle="หนังสือที่ได้รับความนิยมสูงสุด"
+            books={popularBooks.map((b) => ({ ...b, isPopular: true, isNew: false }))} />
         )}
         {selectedGenres.length === 0 && newBooks.length > 0 && (
-          <BookSection
-            title="✨ มาใหม่"
-            subtitle="หนังสือที่เพิ่งเข้ามาใหม่ในระบบ"
-            books={newBooks.map((b) => ({ ...b, isNew: true, isPopular: false }))}
-          />
+          <BookSection title="✨ มาใหม่" subtitle="หนังสือที่เพิ่งเข้ามาใหม่ในระบบ"
+            books={newBooks.map((b) => ({ ...b, isNew: true, isPopular: false }))} />
         )}
         {mangaBooks.length > 0 && (
           <BookSection title="📖 มังงะ" subtitle="การ์ตูนญี่ปุ่นสุดฮิต" books={mangaBooks} />

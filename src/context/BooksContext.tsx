@@ -22,6 +22,7 @@ export type FormData = {
   tags?: string[];
   isNew?: boolean;
   isPopular?: boolean;
+  isHidden?: boolean;
   rating?: number;
   reviewCount?: number;
   price?: number;
@@ -106,6 +107,7 @@ function mapRow(row: any): Book {
 
     isNew: row.is_new ?? false,
     isPopular: row.is_popular ?? false,
+    isHidden: row.is_hidden ?? false, 
     rating: Number(row.rating ?? 0),
     reviewCount: Number(row.review_count ?? 0),
     price: Number(row.price ?? 0),
@@ -235,6 +237,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
         slug,
         is_new,
         is_popular,
+        is_hidden,
         rating,
         review_count,
         price,
@@ -469,6 +472,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
           type_id: book.type ? TYPE_ID_MAP[book.type] ?? null : null,
           is_new: book.isNew ?? false,
           is_popular: book.isPopular ?? false,
+          is_hidden: book.isHidden ?? false,
           rating: book.rating ?? 0,
           review_count: book.reviewCount ?? 0,
           price: book.price ?? 0,
