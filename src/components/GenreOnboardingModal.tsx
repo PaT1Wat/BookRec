@@ -26,7 +26,6 @@ export default function GenreOnboardingModal({ userId, open, onDone, onSkip }: P
     if (!open) return;
 
     const fetchData = async () => {
-      // ✅ โหลด genre tags ทั้งหมด + tags ที่ user เลือกไว้แล้ว พร้อมกัน
       const [{ data: allTags }, { data: userTags }] = await Promise.all([
         supabase
           .from("tag")
@@ -42,7 +41,6 @@ export default function GenreOnboardingModal({ userId, open, onDone, onSkip }: P
 
       setTags(allTags ?? []);
 
-      // ✅ pre-select tags ที่มีอยู่แล้ว
       const existingIds = (userTags ?? []).map((t: any) => t.tagID);
       setSelected(existingIds);
     };
@@ -72,7 +70,6 @@ export default function GenreOnboardingModal({ userId, open, onDone, onSkip }: P
 
     setLoading(true);
 
-    // ลบของเก่าแล้วใส่ใหม่ทั้งหมด
     await supabase.from("user_tags").delete().eq("user_id", userId);
 
     const rows = selected.map((tagID) => ({ user_id: userId, tagID }));
@@ -97,6 +94,23 @@ export default function GenreOnboardingModal({ userId, open, onDone, onSkip }: P
     try {
       localStorage.removeItem(`skippedGenreOnboarding:${userId}`);
     } catch {}
+
+    // ✅ ล้าง cache recs ทั้งหมดของ user นี้ใน localStorage
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(`recs:${userId}`)) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+    } catch {}
+
+    // ✅ dispatch recs:invalidate ให้ Index.tsx re-fetch recommendations ใหม่
+    window.dispatchEvent(
+      new CustomEvent("recs:invalidate", { detail: { userId } })
+    );
 
     onDone();
   };

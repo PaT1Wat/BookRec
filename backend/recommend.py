@@ -49,7 +49,7 @@ def action_weight(action):
         "favorite": 5.0,
         "rating": 4.5,
         "review": 3.5,
-        "view": 1.0,
+        "view": 0.1,
     }
     return weights.get(str(action or "").lower(), 0.0)
 

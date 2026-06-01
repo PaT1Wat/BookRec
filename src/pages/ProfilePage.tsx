@@ -22,6 +22,8 @@ type ReviewItem = {
   } | null;
 };
 
+const REVIEWS_PER_PAGE = 6;
+
 const ProfilePage = () => {
   const { user, profile, loading, refreshProfile } = useAuth();
   const { toast } = useToast();
@@ -36,6 +38,7 @@ const ProfilePage = () => {
   const [reviewLoading, setReviewLoading] = useState(true);
   const [interestTags, setInterestTags] = useState<string[]>([]);
   const [showGenreModal, setShowGenreModal] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     if (profile) {
@@ -130,6 +133,12 @@ const ProfilePage = () => {
       topGenres: interestTags,
     };
   }, [reviews, interestTags]);
+
+  const totalPages = Math.ceil(reviews.length / REVIEWS_PER_PAGE);
+  const paginatedReviews = reviews.slice(
+    (currentPage - 1) * REVIEWS_PER_PAGE,
+    currentPage * REVIEWS_PER_PAGE
+  );
 
   if (loading) {
     return (
@@ -374,6 +383,7 @@ const ProfilePage = () => {
         </div>
       </div>
 
+      {/* Reviews Section */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Star className="h-5 w-5 text-amber-400 fill-amber-400" />
@@ -397,72 +407,110 @@ const ProfilePage = () => {
             <p className="text-muted-foreground">ยังไม่มีรีวิวของคุณ</p>
           </div>
         ) : (
-          <div className="grid gap-4">
-            {reviews.map((r) => (
-              <Link
-                key={r.reviewID}
-                to={`/book/${r.book?.bookID}`}
-                className="flex gap-4 rounded-3xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
-              >
-                <img
-                  src={r.book?.coverImage || "/placeholder.svg"}
-                  alt={r.book?.title || "หนังสือ"}
-                  className="h-24 w-16 rounded-lg object-cover flex-shrink-0"
-                />
+          <>
+            <div className="grid gap-4">
+              {paginatedReviews.map((r) => (
+                <Link
+                  key={r.reviewID}
+                  to={`/book/${r.book?.bookID}`}
+                  className="flex gap-4 rounded-3xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
+                >
+                  <img
+                    src={r.book?.coverImage || "/placeholder.svg"}
+                    alt={r.book?.title || "หนังสือ"}
+                    className="h-24 w-16 rounded-lg object-cover flex-shrink-0"
+                  />
 
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <p className="font-semibold text-foreground line-clamp-1">
-                    {r.book?.title || "ไม่ทราบชื่อ"}
-                  </p>
-
-                  <div className="flex items-center gap-0.5">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star
-                        key={s}
-                        className={`h-4 w-4 ${
-                          s <= (r.rating ?? 0)
-                            ? "fill-amber-400 text-amber-400"
-                            : "text-muted-foreground/30"
-                        }`}
-                      />
-                    ))}
-                    <span className="ml-1 text-xs text-muted-foreground">
-                      {r.rating}/5
-                    </span>
-                  </div>
-
-                  {r.comment && (
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {r.comment}
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <p className="font-semibold text-foreground line-clamp-1">
+                      {r.book?.title || "ไม่ทราบชื่อ"}
                     </p>
-                  )}
 
-                  <p className="text-xs text-muted-foreground">
-                    {r.createdAt
-                      ? new Date(r.createdAt).toLocaleDateString("th-TH", {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })
-                      : ""}
-                  </p>
+                    <div className="flex items-center gap-0.5">
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Star
+                          key={s}
+                          className={`h-4 w-4 ${
+                            s <= (r.rating ?? 0)
+                              ? "fill-amber-400 text-amber-400"
+                              : "text-muted-foreground/30"
+                          }`}
+                        />
+                      ))}
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        {r.rating}/5
+                      </span>
+                    </div>
+
+                    {r.comment && (
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {r.comment}
+                      </p>
+                    )}
+
+                    <p className="text-xs text-muted-foreground">
+                      {r.createdAt
+                        ? new Date(r.createdAt).toLocaleDateString("th-TH", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })
+                        : ""}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm transition hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ← ก่อนหน้า
+                </button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }).map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setCurrentPage(i + 1)}
+                      className={`h-9 w-9 rounded-xl text-sm font-medium transition ${
+                        currentPage === i + 1
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "border border-border bg-card text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
                 </div>
-              </Link>
-            ))}
-          </div>
+
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-sm transition hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ถัดไป →
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      <GenreOnboardingModal 
+      <GenreOnboardingModal
         userId={user.id}
         open={showGenreModal}
         onDone={() => {
-          clearUserRecsCache(user.id);  // ← ล้าง cache + ยิง recs:invalidate
+          clearUserRecsCache(user.id);
           setShowGenreModal(false);
           window.location.reload();
         }}
       />
-      
     </div>
   );
 };
