@@ -221,7 +221,15 @@ const AdminPage = () => {
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { toast({ title: "กรุณากรอกชื่อเรื่อง", variant: "destructive" }); return; }
+    if (!form.title.trim()) { toast({ title: "กรุณากรอกชื่อเรื่อง (ไทย)", variant: "destructive" }); return; }
+    if (!form.titleEn.trim()) { toast({ title: "กรุณากรอกชื่อเรื่อง (EN)", variant: "destructive" }); return; }
+    if (!form.authorName.trim()) { toast({ title: "กรุณากรอกชื่อผู้แต่ง", variant: "destructive" }); return; }
+    if (!form.publisherName.trim()) { toast({ title: "กรุณากรอกชื่อสำนักพิมพ์", variant: "destructive" }); return; }
+    if (!form.price || form.price <= 0) { toast({ title: "กรุณากรอกราคา", variant: "destructive" }); return; }
+    if (!form.coverUrl.trim()) { toast({ title: "กรุณาใส่รูปปก", variant: "destructive" }); return; }
+    if (form.genres.length === 0) { toast({ title: "กรุณาเลือกแนวอย่างน้อย 1 แนว", variant: "destructive" }); return; }
+    if (!form.description.trim()) { toast({ title: "กรุณากรอกเรื่องย่อ", variant: "destructive" }); return; }
+
     setSaving(true);
     const tagsArray = form.tags.split(",").map(t => t.trim()).filter(Boolean);
     const allTags = [...new Set([...form.genres, ...tagsArray])];
