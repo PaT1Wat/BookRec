@@ -735,7 +735,7 @@ const AdminPage = () => {
                     onChange={e => { const v = e.target.value; if (/^[ก-๙0-9\s]*$/.test(v)) setForm({ ...form, title: v }); }} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">ชื่อเรื่อง (EN)</label>
+                  <label className="text-sm font-medium">ชื่อเรื่อง (EN)*</label>
                   <Input placeholder="ชื่อภาษาอังกฤษ" value={form.titleEn}
                     onChange={e => { const v = e.target.value; if (/^[a-zA-Z0-9\s]*$/.test(v)) setForm({ ...form, titleEn: v }); }} />
                 </div>
