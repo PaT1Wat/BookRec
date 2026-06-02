@@ -14,6 +14,7 @@ type FormData = {
   price: number; coverUrl: string;
   type: string; genres: string[]; tags: string; description: string;
   isNew: boolean; isHidden: boolean;
+  publishDate?: string; // ← เพิ่ม publishDate ในฟอร์มด้วย
 };
 
 type UserRow = {
@@ -32,7 +33,10 @@ type ReviewWithBook = {
 const emptyForm: FormData = {
   title: "", titleEn: "", authorName: "", publisherName: "",
   price: 0, coverUrl: "", type: "manga",
-  genres: [], tags: "", description: "", isNew: false, isHidden: false,
+  genres: [], tags: "", description: "", 
+  isNew: false,
+  isHidden: false,
+  publishDate: "", // ← เพิ่ม default publishDate เป็น empty string
 };
 
 const GENRE_LIST = [
@@ -222,7 +226,17 @@ const AdminPage = () => {
     const tagsArray = form.tags.split(",").map(t => t.trim()).filter(Boolean);
     const allTags = [...new Set([...form.genres, ...tagsArray])];
     try {
-      const payload = { ...form, tags: allTags, rating: 0, reviewCount: 0, isPopular: false };
+      const payload = { 
+        ...form, 
+        tags: allTags, 
+        rating: 0, 
+        reviewCount: 0, 
+        isPopular: false,
+        ...(editingId ? {} : {
+          publishDate: new Date().toISOString(),
+          isNew: true,
+        }),
+      };
       if (editingId) { await updateBook(editingId, payload); toast({ title: "แก้ไขหนังสือสำเร็จ ✅" }); }
       else { await addBook(payload); toast({ title: "เพิ่มหนังสือสำเร็จ ✅" }); }
       setShowForm(false); setForm(emptyForm); setEditingId(null);
