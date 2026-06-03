@@ -284,12 +284,15 @@ export function BooksProvider({ children }: { children: ReactNode }) {
 
           return {
             ...book,
-            rating: Number(stat?.rating ?? book.rating ?? 0),
+            rating: Number(book.rating ?? 0),
             reviewCount: Number(stat?.reviewCount ?? book.reviewCount ?? 0),
             favoriteCount: Number(stat?.favoriteCount ?? 0),
             reviewActionCount: Number(stat?.reviewActionCount ?? 0),
             viewCount: Number(stat?.viewCount ?? 0),
             interactionCount: Number(stat?.interactionCount ?? 0), // ✅ เพิ่ม interactionCount รวมทุก action
+            interactionScore: Number(stat?.interactionScore ?? 0), // ✅ เพิ่ม interactionScore ที่คำนวณจาก interaction ต่างๆ
+            clickScore: Number(stat?.clickScore ?? 0), // ✅ เพิ่ม clickScore ที่คำนวณจากการคลิก
+            negativeReviewCount: Number(stat?.negativeReviewCount ?? 0), // ✅ เพิ่ม negativeReviewCount สำหรับนับรีวิวที่ให้คะแนนต่ำ (1-2 ดาว)
           };
         });
 

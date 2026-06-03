@@ -23,13 +23,11 @@ const BookCard = ({ book }: BookCardProps) => {
   const viewCount         = Number((book as any).viewCount         ?? 0);
   const reviewCount       = Number(book.reviewCount ?? 0);
 
-  // ─── คะแนนที่แสดง: ถ้ามี rating จริงให้ใช้ ถ้าไม่มีให้คำนวณจาก favorite + review ───
-  const computedRating = Math.min(
-    5,
-    (favoriteCount * 5.0 + reviewActionCount * 4.5) /
-      Math.max(favoriteCount + reviewActionCount, 1)
-  );
-  const displayRating = (book.rating ?? 0) > 0 ? (book.rating ?? 0) : computedRating;
+
+  const displayRating = book.rating ?? 0;
+
+  const interactionScore = Number((book as any).interactionScore ?? 0);
+
 
   const logInteraction = async (actionType: string) => {
     if (!user) return;
@@ -145,6 +143,7 @@ const BookCard = ({ book }: BookCardProps) => {
             <span className="text-xs font-medium text-foreground">
               {displayRating.toFixed(1)}
             </span>
+
           </div>
 
           {(book.price ?? 0) > 0 && (
@@ -171,7 +170,7 @@ const BookCard = ({ book }: BookCardProps) => {
             </span>
           )}
           <span className="flex items-center gap-0.5">
-            ({favoriteCount + reviewActionCount + viewCount})
+            ({interactionScore})
           </span>
         </div>
 

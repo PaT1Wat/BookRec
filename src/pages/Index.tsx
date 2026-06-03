@@ -5,6 +5,7 @@ import BookSection from "@/components/BookSection";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useFavorites } from "@/lib/favorites";
+import { logImpression, logClick } from "@/lib/recTracking";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 const RECOMMEND_LIMIT = 12;
@@ -15,7 +16,7 @@ const GENRE_MAP: Record<string, string> = {
   "แฟนตาซี": "แฟนตาซี", "โรแมนติก": "โรแมนติก", "แอ็กชัน": "แอ็กชัน",
   "คอมเมดี้": "คอมเมดี้", "ดราม่า": "ดราม่า", "สืบสวน": "สืบสวน",
   "สยองขวัญ": "สยองขวัญ", "ชีวิตประจำวัน": "ชีวิตประจำวัน", "ผจญภัย": "ผจญภัย",
-  "เหนือธรรมชาติ": "ไซไฟ", "BL ( Boy Love )": "BL ( Boy Love )", "GL ( Girl Love )": "GL ( Girl Love )",
+  "ไซไฟ": "ไซไฟ", "BL ( Boy Love )": "BL ( Boy Love )", "GL ( Girl Love )": "GL ( Girl Love )",
 };
 const GENRE_LABELS = Object.keys(GENRE_MAP);
 
@@ -62,35 +63,31 @@ const RecommendSkeleton = () => (
   </section>
 );
 
-// ─── sort / score helpers ──────────────────────────────────────────────────────
-// ✅ ไม่รวม rating เพื่อให้ tie-break สะท้อน interaction จริงๆ
-const interactionScore = (b: any) =>
-  (b.favoriteCount ?? 0) * 5.0 +
-  (b.reviewActionCount ?? 0) * 4.5 +
-  (b.viewCount ?? 0) * 0.2 +
-  (b.reviewCount ?? 0) * 3.0;
-
-// ✅ ผลรวม interaction ดิบๆ สำหรับ tie-break
+// ─── static score helpers (ไม่ depend on state) ───────────────────────────────
 const totalInteractions = (b: any) =>
   (b.favoriteCount ?? 0) +
   (b.reviewActionCount ?? 0) +
   (b.viewCount ?? 0) +
   (b.reviewCount ?? 0);
 
-// ✅ คะแนนที่ใช้เรียง: ถ้ามี rating จริงให้ใช้ ถ้าไม่มีคำนวณจาก favorite + review
 const computedRating = (b: any): number => {
-  if ((b.rating ?? 0) > 0) return b.rating as number;
+  const totalReviews = Number(b.reviewCount ?? 0);
+  const negativeReviews = Number((b as any).negativeReviewCount ?? 0);
+
+  if ((b.rating ?? 0) > 0) {
+    const rating = b.rating as number;
+    if (totalReviews > 0 && negativeReviews > 0) {
+      // ✅ ตรงกับ Python: 1 ดาว = -1.0 weight
+      // หัก 1.0 ต่อ 1 รีวิวเชิงลบ หารด้วย total reviews
+      const negativePenalty = (negativeReviews * 1.0) / totalReviews;
+      return Math.max(0, rating - negativePenalty);
+    }
+    return rating;
+  }    
   const fav = Number(b.favoriteCount ?? 0);
   const rev = Number(b.reviewActionCount ?? 0);
   if (fav + rev === 0) return 0;
   return Math.min(5, (fav * 5.0 + rev * 4.5) / (fav + rev));
-};
-
-// ✅ sort หลัก: คะแนนมากสุดก่อน ถ้าเท่ากันดู total interaction ดิบๆ
-const sortByScore = (a: any, b: any) => {
-  const ratingDiff = computedRating(b) - computedRating(a);
-  if (Math.abs(ratingDiff) > 0.001) return ratingDiff;
-  return totalInteractions(b) - totalInteractions(a);
 };
 
 // ─── Index ─────────────────────────────────────────────────────────────────────
@@ -110,11 +107,26 @@ const Index = () => {
   const [interactedIds, setInteractedIds] = useState<Set<string>>(new Set());
   const [interactionsReady, setInteractionsReady] = useState(false);
 
+  const [genreWeights, setGenreWeights] = useState<Record<string, number>>({});
+
   const dbGenres = selectedGenres.map((g) => GENRE_MAP[g]).filter(Boolean);
   const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
   const [recsReady, setRecsReady] = useState(false);
   const fetchedKeyRef = useRef<string | null>(null);
   const fetchSeqRef = useRef(0);
+
+  // ─── sortByScore รู้จัก genreWeights ─────────────────────────────────────
+  const sortByScore = useCallback((a: any, b: any) => {
+    const getScore = (book: any) => {
+      const base = computedRating(book);
+      const tags: string[] = book.tags ?? book.genres ?? [];
+      const genreBoost = tags.reduce((sum, tag) => sum + (genreWeights[tag] ?? 0), 0) * 0.1;
+      return base + genreBoost + (book.clickScore ?? 0) * 0.5;
+    };
+    const diff = getScore(b) - getScore(a);
+    if (Math.abs(diff) > 0.001) return diff;
+    return totalInteractions(b) - totalInteractions(a);
+  }, [genreWeights]);
 
   // ─── fetch interactions ────────────────────────────────────────────────────
   const fetchInteractions = useCallback(async () => {
@@ -136,6 +148,28 @@ const Index = () => {
   }, [user?.id]);
 
   useEffect(() => { fetchInteractions(); }, [fetchInteractions]);
+
+  // ─── fetch genre weights จาก rec_impression ───────────────────────────────
+  useEffect(() => {
+    if (!user?.id || books.length === 0) { setGenreWeights({}); return; }
+    (supabase as any)
+      .from("rec_impression")
+      .select("bookID")
+      .eq("user_id", user.id)
+      .eq("clicked", true)
+      .then(({ data }: any) => {
+        const weights: Record<string, number> = {};
+        (data ?? []).forEach((row: any) => {
+          const book = books.find((b: any) => String(b.bookID ?? b.id) === String(row.bookID));
+          if (book) {
+            (book.tags ?? book.genres ?? []).forEach((tag: string) => {
+              weights[tag] = (weights[tag] ?? 0) + 1;
+            });
+          }
+        });
+        setGenreWeights(weights);
+      });
+  }, [user?.id, books.length]);
 
   // ─── Load profile genre tags ───────────────────────────────────────────────
   useEffect(() => {
@@ -194,7 +228,7 @@ const Index = () => {
       : list;
 
   // ─── buildLocalIds ─────────────────────────────────────────────────────────
-  const buildLocalIds = (
+  const buildLocalIds = useCallback((
     booksRef: typeof books,
     favSet: Set<string>,
     prefGenres: string[],
@@ -304,7 +338,7 @@ const Index = () => {
     }
 
     return [...poolA, ...poolB].slice(0, RECOMMEND_LIMIT);
-  };
+  }, [sortByScore]);
 
   // ─── doFetch / applyIds ────────────────────────────────────────────────────
   const doFetch = async (
@@ -338,6 +372,9 @@ const Index = () => {
       if (seq !== fetchSeqRef.current) return;
       saveCachedIds(cacheKey, ids);
       setRecommendedIds(ids);
+      if (user?.id && ids.length > 0) {
+        logImpression(user.id, ids, "for_you");
+      }
     } catch {
       if (seq !== fetchSeqRef.current) return;
       setRecommendedIds([]);
@@ -400,7 +437,7 @@ const Index = () => {
       )
       .sort(sortByScore)
       .slice(0, RECOMMEND_LIMIT);
-  }, [recommendedIds, books, dbGenres, favoriteSet]);
+  }, [recommendedIds, books, dbGenres, favoriteSet, sortByScore]);
 
   const popularBooks = filterByGenre(
     [...visibleBooks]
@@ -478,6 +515,9 @@ const Index = () => {
                     : "หนังสือยอดนิยมที่คุณอาจสนใจ"
                 }
                 books={recommendedBooks}
+                onBookClick={(bookId) => {
+                  if (user?.id) logClick(user.id, bookId, "for_you");
+                }}
               />
             )}
             {selectedGenres.length > 0 && recommendedBooks.length > 0 && (
@@ -485,6 +525,9 @@ const Index = () => {
                 title={`💡 แนะนำแนว${selectedGenres.join(" & ")}`}
                 subtitle={`หนังสือแนะนำในแนว ${selectedGenres.join(" & ")} สำหรับคุณ`}
                 books={recommendedBooks}
+                onBookClick={(bookId) => {
+                  if (user?.id) logClick(user.id, bookId, "for_you");
+                }}
               />
             )}
             {selectedGenres.length > 0 && recommendedBooks.length === 0 && (

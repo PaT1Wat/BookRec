@@ -23,11 +23,17 @@ MODEL_FILE = MODEL_DIR / "lightfm.pkl"
 
 
 def fetch_table(name):
+    """ดึงข้อมูลทั้งหมดจาก Supabase table ที่ระบุ"""
     return supabase.table(name).select("*").execute().data or []
 
 
 @lru_cache(maxsize=1)
 def fetch_data():
+    """
+    ดึงข้อมูลหลักทั้งหมดที่ใช้ในระบบแนะนำ และ cache ไว้ในหน่วยความจำ
+    เพื่อไม่ต้องดึงซ้ำทุกครั้งที่มีการเรียกใช้
+    ประกอบด้วย: books, interaction, tag, bookTag
+    """
     return {
         "books": fetch_table("books"),
         "interaction": fetch_table("interaction"),
@@ -37,24 +43,44 @@ def fetch_data():
 
 
 def clear_cache():
+    """ล้าง cache ของ fetch_data เพื่อบังคับให้ดึงข้อมูลใหม่จาก Supabase"""
     fetch_data.cache_clear()
 
 
 def get_book_id(row):
+    """ดึง bookID จาก row ของ interaction โดยรองรับหลายรูปแบบชื่อ field"""
     return row.get("bookID") or row.get("book_id") or row.get("bookId")
 
 
-def action_weight(action):
-    weights = {
-        "favorite": 5.0,
-        "rating": 4.5,
-        "review": 3.5,
-        "view": 0.1,
-    }
-    return weights.get(str(action or "").lower(), 0.0)
+def action_weight(action, rating=None):
+    """
+    คำนวณ weight จาก action และ rating
+    - favorite: 5.0 (แสดงความชอบชัดเจนที่สุด)
+    - review: คำนวณจากดาว 1-5
+        - 5 ดาว = 5.0 (ชอบมาก)
+        - 4 ดาว = 3.8
+        - 3 ดาว = 2.6 (กลางๆ)
+        - 2 ดาว = 1.4
+        - 1 ดาว = -1.0 (ไม่ชอบ → กรองออกเพราะ weight <= 0)
+    - view: 0.1 (แค่คลิกดู ยังไม่แน่ใจว่าชอบ)
+    """
+    if action == "favorite":
+        return 5.0
+    if action == "view":
+        return 0.1
+    if action == "review":
+        if rating is None: 
+            return 2.5  # ไม่มีดาว → กลางๆ
+        # สูตร: แปลง rating 1-5 → weight -1.0 ถึง 5.0
+        return round((rating / 5.0) * 6.0 - 1.0, 2)
+    return 0.0
 
 
 def clean_ids(ids):
+    """
+    กรอง None ออก และ deduplicate list ของ ID
+    คืนค่าเป็น list ของ string ที่ไม่ซ้ำกัน
+    """
     result = []
     for value in ids:
         if value is None:
@@ -66,6 +92,10 @@ def clean_ids(ids):
 
 
 def build_book_tags(data):
+    """
+    สร้าง dict mapping bookID → set of tagName
+    ใช้สำหรับ filter หนังสือตาม genre และสร้าง item features ให้ LightFM
+    """
     tag_map = {
         tag.get("tagID"): tag.get("tagName")
         for tag in data["tag"]
@@ -81,6 +111,10 @@ def build_book_tags(data):
 
 
 def book_match_genres(book_id, genres, book_tags):
+    """
+    ตรวจสอบว่าหนังสือมี genre ตรงตามที่ต้องการทุกตัวหรือไม่
+    ถ้า genres ว่าง → คืน True (ไม่กรอง)
+    """
     if not genres:
         return True
     need = {str(g).strip().lower() for g in genres}
@@ -89,6 +123,7 @@ def book_match_genres(book_id, genres, book_tags):
 
 
 def filter_by_genres(ids, genres, book_tags):
+    """กรอง list ของ bookID ให้เหลือเฉพาะหนังสือที่ตรง genre ที่ระบุ"""
     return [
         book_id
         for book_id in clean_ids(ids)
@@ -97,6 +132,10 @@ def filter_by_genres(ids, genres, book_tags):
 
 
 def get_interacted_books(user_id, data):
+    """
+    ดึง set ของ bookID ที่ผู้ใช้เคย interact แล้ว (favorite, review, view)
+    ใช้สำหรับกรองหนังสือที่เคยดูแล้วออกจากผลแนะนำ
+    """
     interacted = set()
     for row in data["interaction"]:
         if str(row.get("user_id")) == str(user_id):
@@ -107,6 +146,10 @@ def get_interacted_books(user_id, data):
 
 
 def build_item_features(data):
+    """
+    สร้าง dict mapping bookID → list of "tag:tagName"
+    ใช้เป็น item features ให้ LightFM เรียนรู้ความสัมพันธ์ระหว่าง tag กับความชอบของผู้ใช้
+    """
     book_tags = build_book_tags(data)
     features = {}
     for book in data["books"]:
@@ -121,6 +164,17 @@ def build_item_features(data):
 
 
 def train_and_save_model(epochs=10):
+    """
+    Train LightFM model จาก interaction ทั้งหมดในระบบ แล้วบันทึกลงไฟล์ .pkl
+
+    ขั้นตอน:
+    1. ดึงข้อมูล interaction ทั้งหมด
+    2. คำนวณ weight ของแต่ละ interaction จาก action_weight()
+    3. กรองเฉพาะ interaction ที่มี weight > 0 (ตัด 1 ดาวออก)
+    4. สร้าง item features จาก tag ของแต่ละหนังสือ
+    5. Train LightFM ด้วย WARP loss (เหมาะกับ implicit feedback)
+    6. บันทึก model, dataset, item_feature_tuples ลงไฟล์
+    """
     clear_cache()
     data = fetch_data()
 
@@ -136,7 +190,8 @@ def train_and_save_model(epochs=10):
     for row in data["interaction"]:
         user_id = row.get("user_id")
         book_id = get_book_id(row)
-        weight = action_weight(row.get("actionType"))
+        rating = row.get("rating")
+        weight = action_weight(row.get("actionType"), rating)
         if user_id and book_id and weight > 0:
             users.add(str(user_id))
             items.add(str(book_id))
@@ -168,8 +223,8 @@ def train_and_save_model(epochs=10):
     item_features = dataset.build_item_features(item_feature_tuples)
 
     model = LightFM(
-        loss="warp",
-        no_components=8,
+        loss="warp",       # WARP: เหมาะกับ implicit feedback (ไม่มี negative sample)
+        no_components=8,   # จำนวน latent dimension
         learning_rate=0.05,
         random_state=42,
     )
@@ -199,6 +254,7 @@ def train_and_save_model(epochs=10):
 
 
 def load_model():
+    """โหลด model ที่ train แล้วจากไฟล์ .pkl คืน None ถ้าไม่มีไฟล์"""
     if not MODEL_FILE.exists():
         return None
     with open(MODEL_FILE, "rb") as file:
@@ -206,6 +262,17 @@ def load_model():
 
 
 def fallback_from_interaction(user_id, n=12, genres=None):
+    """
+    ระบบแนะนำสำรอง (Fallback) ใช้เมื่อ LightFM ใช้งานไม่ได้
+    เช่น ผู้ใช้ใหม่ที่ไม่อยู่ใน model หรือข้อมูลไม่พอ train
+
+    วิธีคำนวณ:
+    1. รวม weight ของ interaction ทุกคนในระบบต่อหนังสือแต่ละเล่ม
+       → หนังสือที่คนชอบรวมกันมากจะได้คะแนนสูง (ยอดนิยม)
+    2. กรองหนังสือที่ผู้ใช้เคยดูแล้วออก
+    3. กรอง genre ถ้ามีการระบุ
+    4. ถ้าได้ไม่ครบ n เล่ม → เติมด้วยหนังสือที่มี rating/review สูงสุด
+    """
     data = fetch_data()
     book_tags = build_book_tags(data)
     interacted = get_interacted_books(user_id, data)
@@ -213,7 +280,8 @@ def fallback_from_interaction(user_id, n=12, genres=None):
     scores = defaultdict(float)
     for row in data["interaction"]:
         book_id = get_book_id(row)
-        weight = action_weight(row.get("actionType"))
+        rating = row.get("rating")
+        weight = action_weight(row.get("actionType"), rating)
         if book_id and weight > 0:
             scores[str(book_id)] += weight
 
@@ -224,7 +292,7 @@ def fallback_from_interaction(user_id, n=12, genres=None):
     ]
     ranked_filtered = filter_by_genres(ranked, genres, book_tags)
 
-    # Fallback to other books in those genres sorted by rating/reviews if count is under n
+    # ถ้าได้ไม่ครบ n เล่ม → เติมจากหนังสือที่มี rating และ review สูงสุด (ที่ยังไม่เคยดู และตรง genre)
     if len(ranked_filtered) < n:
         all_books_sorted = sorted(
             data["books"],
@@ -243,8 +311,9 @@ def fallback_from_interaction(user_id, n=12, genres=None):
 
 def _do_predict(obj, uid, item_map, item_feature_tuples):
     """
-    สร้าง item_features จาก tuples ที่บันทึกไว้ใน model
-    และ predict — แยกเป็นฟังก์ชันเพื่อให้ retry ได้ง่าย
+    ให้ LightFM ทำนายคะแนนหนังสือทุกเล่มสำหรับผู้ใช้คนนี้
+    คืนค่าเป็น array ของคะแนน (index ตรงกับ item_map)
+    แยกเป็นฟังก์ชันเพื่อให้ retry ได้ง่ายเมื่อ features ไม่ตรง
     """
     dataset = obj["dataset"]
     model = obj["model"]
@@ -258,6 +327,10 @@ def _do_predict(obj, uid, item_map, item_feature_tuples):
 
 
 def get_user_preferred_genres(user_id):
+    """
+    ดึง genre ที่ผู้ใช้เลือกไว้ตอนสมัครหรือตั้งค่าโปรไฟล์
+    ใช้เป็น default genre filter เมื่อผู้ใช้ไม่ได้เลือก genre เองบนหน้าหลัก
+    """
     try:
         user_tags = supabase.table("user_tags").select("tagID").eq("user_id", user_id).execute().data or []
         if not user_tags:
@@ -271,16 +344,32 @@ def get_user_preferred_genres(user_id):
 
 
 def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = None):
+    """
+    ฟังก์ชันหลักสำหรับแนะนำหนังสือให้ผู้ใช้
+
+    ลำดับการทำงาน:
+    1. ดึง genre ที่ผู้ใช้ชอบ (จาก profile หรือ parameter)
+    2. โหลด LightFM model → ถ้าไม่มี train ใหม่อัตโนมัติ
+    3. ถ้าผู้ใช้ไม่อยู่ใน model (ผู้ใช้ใหม่) → ใช้ fallback
+    4. ถ้า features ไม่ตรง (มีหนังสือ/tag ใหม่) → retrain แล้ว retry 1 ครั้ง
+    5. เรียงหนังสือตามคะแนน LightFM จากสูงไปต่ำ
+    6. กรองออก: หนังสือที่เคยดูแล้ว, ไม่ตรง genre
+    7. คืน 12 เล่มแรก
+
+    เงื่อนไขพิเศษ:
+    - ถ้าผู้ใช้เลือก genre filter บนหน้าหลัก → แนะนำเฉพาะหนังสือที่มี interaction ในระบบ
+      (เพื่อให้ผลแม่นยำกว่าสุ่มจากหนังสือใหม่ที่ยังไม่มีใครเคยดู)
+    """
     data = fetch_data()
     book_tags = build_book_tags(data)
     interacted = get_interacted_books(user_id, data)
 
-    # If genres are not passed explicitly, get user's preferred genres
+    # ถ้าไม่มี genre ที่ระบุมาเลย → ใช้ genre ที่ผู้ใช้ชอบจาก profile แทน
     effective_genres = genres
     if not effective_genres:
         effective_genres = get_user_preferred_genres(user_id)
 
-    # Build set of book IDs that have at least one interaction in the system
+    # bookID ที่มี interaction อย่างน้อย 1 ครั้งในระบบ
     interacted_book_ids = {
         str(get_book_id(row))
         for row in data["interaction"]
@@ -304,14 +393,15 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
     user_map, item_map, *_ = dataset.mapping()
     uid = user_map.get(str(user_id))
 
+    # ผู้ใช้ใหม่ที่ยังไม่มีใน model → ใช้ fallback (ยอดนิยม)
     if uid is None:
         return fallback_from_interaction(user_id, n, effective_genres)
 
-    # ✅ จุดหลัก: ถ้า features ไม่ตรง → retrain อัตโนมัติ แล้ว retry 1 ครั้ง
     try:
         scores = _do_predict(obj, uid, item_map, item_feature_tuples)
 
     except ValueError as e:
+        # features ไม่ตรง เช่น มีหนังสือหรือ tag ใหม่เพิ่มเข้ามา → retrain แล้ว retry
         print(f"[recommend] feature mismatch ({e}) — retraining model...")
         result = train_and_save_model(epochs=10)
 
@@ -348,11 +438,9 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
         book_id = str(book_id)
         if book_id in interacted:
             continue
-        # If explicit genres / user preferred genres are active
         if effective_genres and not book_match_genres(book_id, effective_genres, book_tags):
             continue
-        # If genres is explicitly selected (user clicked a genre filter tag on homepage)
-        # filter to only books that have had prior interaction
+        # ถ้าผู้ใช้กด genre filter → แนะนำเฉพาะหนังสือที่มีคนเคย interact แล้ว
         if genres and (book_id not in interacted_book_ids):
             continue
         result.append(book_id)

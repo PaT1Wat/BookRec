@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import traceback
 
 from dotenv import load_dotenv
@@ -52,56 +53,72 @@ async def chat(body: dict):
         user_msg = body.get("message", "")
         books_context = body.get("books", [])
         history = body.get("history", [])
-        
+
+        # ─── history text ──────────────────────────────────────────────────
         history_text = "\n".join(
             [
-                f"{m.get('role')}: {m.get('content')}" 
-                for m in history[-10:]  # เอาแค่ 10 ข้อความล่าสุดในประวัติการสนทนา
-                if m.get("content")  # กรองข้อความที่ไม่มี content
+                f"{m.get('role')}: {m.get('content')}"
+                for m in history[-10:]
+                if m.get("content")
             ]
         )
 
+        # ─── จำกัด books ให้ส่งแค่ข้อมูลที่จำเป็น ─────────────────────────
+        books_summary = [
+            {
+                "title": b.get("title", ""),
+                "titleEn": b.get("titleEn", ""),
+                "type": b.get("type", ""),
+                "tags": b.get("tags", [])[:5],
+                "rating": b.get("rating", 0),
+                "author": b.get("authorName", ""),
+            }
+            for b in books_context[:50]  # จำกัดแค่ 50 เล่ม
+        ]
+
+        # ─── prompt ────────────────────────────────────────────────────────
         prompt = f"""
-        คุณคือ BookBot ผู้ช่วยแนะนำหนังสือภาษาไทย
+คุณคือ BookBot ผู้ช่วยแนะนำหนังสือภาษาไทย
 
-        ประวัติการสนทนาก่อนหน้า:
-        {history_text}
+ประวัติการสนทนาก่อนหน้า:
+{history_text}
 
-        ข้อมูลหนังสือในระบบ:
-        {json.dumps(books_context, ensure_ascii=False)}
+ข้อมูลหนังสือในระบบ:
+{json.dumps(books_summary, ensure_ascii=False)}
 
-        กฎ:
-        - ใช้ข้อมูลจากระบบนี้เท่านั้น
-        - ห้ามแต่งข้อมูลที่ไม่มีในระบบ
-        - ถ้าผู้ใช้พูดต่อจากคำถามก่อนหน้า เช่น "ขอแบบมังงะ", "เอาแนวเดิม", "ขอแบบดราม่า"
-            ให้ใช้ประวัติการสนทนาก่อนหน้ามาช่วยตีความ
-        - ตอบกลับเป็น JSON เท่านั้น
-        - recommendations ต้องเป็น array เสมอ
+กฎ:
+- ใช้ข้อมูลจากระบบนี้เท่านั้น
+- ห้ามแต่งข้อมูลที่ไม่มีในระบบ
+- ถ้าผู้ใช้พูดต่อจากคำถามก่อนหน้า เช่น "ขอแบบมังงะ", "เอาแนวเดิม", "ขอแบบดราม่า"
+    ให้ใช้ประวัติการสนทนาก่อนหน้ามาช่วยตีความ
+- ตอบกลับเป็น JSON เท่านั้น
+- recommendations ต้องเป็น array เสมอ
 
-        รูปแบบ JSON:
+รูปแบบ JSON:
+{{
+    "reply": "ข้อความตอบกลับ",
+    "recommendations": [
         {{
-            "reply": "ข้อความตอบกลับ",
-            "recommendations": [
-                {{
-                    "title": "ชื่อหนังสือ",
-                    "reason": "เหตุผลที่แนะนำ"
-                }},
-            ]
+            "title": "ชื่อหนังสือ",
+            "reason": "เหตุผลที่แนะนำ"
         }}
+    ]
+}}
 
-        คำถามล่าสุด:
-        {user_msg}
-        """
+คำถามล่าสุด:
+{user_msg}
+"""
 
+        # ─── เรียก Gemini พร้อม fallback ──────────────────────────────────
         response = None
         last_error = None
-        
+
         models = [
             "gemini-2.5-flash",
-            "gemini-3-flash",
-            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash-lite-preview-06-17",
+            "gemini-2.0-flash",
         ]
-        
+
         for model in models:
             try:
                 print(f"[gemini] Trying model: {model}")
@@ -115,28 +132,27 @@ async def chat(body: dict):
                         "response_mime_type": "application/json",
                     },
                 )
-                
+
                 print(f"[gemini] Success with model: {model}")
-                break  # ถ้าสำเร็จ ให้หยุดลองโมเดลอื่น
-            
+                break
+
             except Exception as e:
                 last_error = e
                 print(f"[gemini] failed {model}: {repr(e)}")
-        
+                time.sleep(1)  # ✅ รอก่อนลองโมเดลถัดไป
+
         if response is None:
             raise last_error
-        
 
+        # ─── parse response ────────────────────────────────────────────────
         text = (response.text or "").strip()
 
         print("\n=== GEMINI RESPONSE ===")
         print(text)
         print("=======================\n")
 
-        # ลบ markdown block
-        text = text.replace("```json", "")
-        text = text.replace("```", "")
-        text = text.strip()
+        # ลบ markdown block ถ้ามี
+        text = text.replace("```json", "").replace("```", "").strip()
 
         try:
             parsed = json.loads(text)
@@ -146,10 +162,7 @@ async def chat(body: dict):
                     "reply",
                     "ผมลองคัดหนังสือที่ใกล้เคียงให้แล้วครับ"
                 ),
-                "recommendations": parsed.get(
-                    "recommendations",
-                    []
-                ),
+                "recommendations": parsed.get("recommendations", []),
             }
 
         except Exception as json_error:
@@ -169,6 +182,7 @@ async def chat(body: dict):
             "reply": f"เกิดข้อผิดพลาด: {str(e)}",
             "recommendations": [],
         }
+
 
 # =========================
 # RECOMMEND
@@ -191,9 +205,7 @@ def recommend(user_id: str, genre: str | None = Query(default=None)):
             f"count={len(book_ids)}"
         )
 
-        return {
-            "bookIDs": book_ids
-        }
+        return {"bookIDs": book_ids}
 
     except Exception as e:
         print(f"[api] recommend failed user={user_id}")
@@ -203,6 +215,7 @@ def recommend(user_id: str, genre: str | None = Query(default=None)):
             "bookIDs": [],
             "error": str(e),
         }
+
 
 # =========================
 # RETRAIN
@@ -232,11 +245,10 @@ def retrain():
             "message": str(e),
         }
 
+
 # =========================
 # ROOT
 # =========================
 @app.get("/")
 def root():
-    return {
-        "status": "BookRec API running"
-    }
+    return {"status": "BookRec API running"}

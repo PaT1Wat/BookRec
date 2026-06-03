@@ -5,9 +5,10 @@ interface BookSectionProps {
   title: string;
   subtitle?: string;
   books: Book[];
+  onBookClick?: (bookId: string) => void; // ✅ เพิ่ม
 }
 
-const BookSection = ({ title, subtitle, books }: BookSectionProps) => {
+const BookSection = ({ title, subtitle, books, onBookClick }: BookSectionProps) => {
   if (books.length === 0) return null;
 
   return (
@@ -25,7 +26,12 @@ const BookSection = ({ title, subtitle, books }: BookSectionProps) => {
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {books.map((book) => (
-          <BookCard key={book.id} book={book} />
+          <div
+            key={book.id}
+            onClickCapture={() => onBookClick?.(String((book as any).bookID ?? book.id))}
+          >
+            <BookCard book={book} />
+          </div>
         ))}
       </div>
     </section>
@@ -33,6 +39,5 @@ const BookSection = ({ title, subtitle, books }: BookSectionProps) => {
 };
 
 BookSection.displayName = "BookSection";
-
 
 export default BookSection;

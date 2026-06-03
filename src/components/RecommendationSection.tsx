@@ -5,6 +5,7 @@ import { useBooks } from "@/context/BooksContext";
 import BookCard from "@/components/BookCard";
 import type { Book } from "@/data/books";
 import { useFavorites } from "@/lib/favorites";
+import { logImpression, logClick } from "@/lib/recTracking";
 
 const TARGET_COUNT = 12;
 
@@ -153,6 +154,12 @@ export default function RecommendationSection() {
       } catch {}
 
       setRecBooks(finalBooks);
+
+      // ✅ log ว่าแสดงหนังสืออะไรให้ user คนนี้
+      if (user?.id) {
+        const ids = finalBooks.map((b: any) => String(b.bookID ?? b.id));
+        logImpression(user.id, ids, "for_you");
+      }
     } catch (err) {
       console.error("RecommendationSection fetch failed:", err);
       setRecBooks([]);
@@ -215,7 +222,14 @@ export default function RecommendationSection() {
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
         {recBooks.map((book) => (
-          <BookCard key={book.id} book={book} />
+          <div
+            key={book.id}
+            onClickCapture={() => {
+              if (user?.id) logClick(user.id, String((book as any).bookID ?? book.id), "for_you");
+            }}
+          >
+            <BookCard book={book} />
+          </div>
         ))}
       </div>
     </section>

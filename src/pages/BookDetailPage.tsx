@@ -93,25 +93,20 @@ const BookDetailPage = () => {
 
   useEffect(() => {
     if (id && user) {
-      logInteraction("view", Number(id)).then(() => {
-        refetchBooks();
-      });
+      const key = `viewed:${user.id}:${id}`;
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, "1");
+        logInteraction("view", Number(id)).then(async () => {
+          await new Promise((r) => setTimeout(r, 800));
+          refetchBooks();
+        });
+      }
     }
   }, [id, user]);
 
   const updateBookRating = (reviewList: Review[]) => {
     if (!id) return;
-
-    // ✅ คะแนนเฉลี่ยจาก review เท่านั้น
-    const avg = reviewList.length
-      ? reviewList.reduce((sum, r) => sum + (r.rating ?? 0), 0) /
-        reviewList.length
-      : 0;
-
-    patchBook(String(id), {
-      rating: Number(avg.toFixed(1)),
-      reviewCount: reviewList.length,
-    });
+    patchBook(String(id), { reviewCount: reviewList.length });
   };
 
   const handleSubmit = async () => {
@@ -128,17 +123,22 @@ const BookDetailPage = () => {
     setSubmitting(true);
 
     try {
-      const { error } = await supabase.from("review" as any).insert({
+      const { error } = await supabase.from("review" as any).upsert({
         bookID: Number(id),
         user_id: user.id,
         rating: myRating,
         comment: comment.trim(),
         createdAt: new Date().toISOString(),
-      });
+      }, { onConflict: "bookID,user_id" });
 
       if (error) throw error;
 
-      await logInteraction("review", Number(id));
+      await supabase.from("interaction" as any).upsert({
+        bookID: Number(id),
+        user_id: user.id,
+        actionType: "review",
+        createdAt: new Date().toISOString(),
+      }, { onConflict: "bookID,user_id,actionType" });
 
       const reviewsAfter = await fetchReviews(Number(id));
       updateBookRating(reviewsAfter);
@@ -205,14 +205,24 @@ const BookDetailPage = () => {
   const genres = book.genres ?? [];
   const tags = book.tags ?? [];
 
-  // ✅ คะแนนเฉลี่ยจาก review เท่านั้น — ถ้ายังไม่มี review ใช้ค่าจาก DB
-  const avgRating = reviews.length
-    ? Number((reviews.reduce((s, r) => s + (r.rating ?? 0), 0) / reviews.length).toFixed(1))
-    : Number(book.rating ?? 0);
-
   const favoriteCount     = Number((book as any).favoriteCount     ?? 0);
   const reviewActionCount = Number((book as any).reviewActionCount ?? 0);
   const viewCount         = Number((book as any).viewCount         ?? 0);
+
+  // ✅ คะแนนเฉลี่ยจาก review เท่านั้น — ถ้ายังไม่มี review ใช้ค่าจาก DB
+  const avgRating = Number(book.rating ?? 0);
+
+  // interaction score ตาม recommend.py
+  const reviewScore = reviews.length
+    ? reviews.reduce((sum, r) => {
+        const weight = Number(((r.rating / 5.0) * 6.0 - 1.0).toFixed(2));
+        return sum + (weight > 0 ? weight : 0); // ตัด 1 ดาวออก
+      }, 0)
+    : reviewActionCount * 4.5; // fallback ถ้าไม่มี review data
+
+  const interactionScore = Number(
+    (favoriteCount * 5.0 + reviewScore + viewCount * 0.1).toFixed(1)
+  );
 
   // ✅ interactions รวมทั้งหมด
   const totalInteractions = favoriteCount + reviewActionCount + viewCount;
@@ -318,9 +328,10 @@ const BookDetailPage = () => {
             <span>❤️ Favorite: {favoriteCount}</span>
             <span>💬 Review: {reviewActionCount}</span>
             <span>👁️ View: {viewCount}</span>
+            ({interactionScore})
             <span className="font-medium text-foreground">
               🔥 {totalInteractions} interactions
-            </span>
+            </span> 
           </div>
 
           <div className="text-2xl font-bold text-primary">฿{book.price ?? 0}</div>
