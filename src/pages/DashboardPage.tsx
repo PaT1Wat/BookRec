@@ -1,304 +1,484 @@
 import { useEffect, useState, useMemo } from "react";
 import {
-  BarChart3,
-  BookOpen,
-  Users,
-  Star,
-  TrendingUp,
-  Sparkles,
+  BarChart3, BookOpen, Users, Star, TrendingUp,
+  Heart, Eye, MessageSquare, Sparkles, RefreshCw,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useBooks } from "@/context/BooksContext";
 
+type InteractionStat = {
+  bookID: number;
+  favoriteCount: number | null;
+  reviewCount: number | null;
+  reviewActionCount: number | null;
+  viewCount: number | null;
+  rating: number | null;
+};
+
+type RecentReview = {
+  reviewID: number;
+  rating: number | null;
+  comment: string | null;
+  createdAt: string | null;
+  user_id: string | null;
+  bookID: number;
+};
+
+const GENRE_COLORS = [
+  "#E24B4A","#7F77DD","#1D9E75","#378ADD","#D85A30",
+  "#D4537E","#BA7517","#639922","#888780","#185FA5","#0F6E56","#993556",
+];
+
+function getColor(i: number) { return GENRE_COLORS[i % GENRE_COLORS.length]; }
+
+function StatCard({
+  label, value, sub, icon: Icon, color, bg, loading,
+}: {
+  label: string; value: string | number; sub?: string;
+  icon: React.FC<any>; color: string; bg: string; loading?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border bg-card p-5 shadow-card hover:shadow-card-hover transition-all duration-200">
+      <div className="flex items-center justify-between mb-3">
+        <div
+          className="rounded-lg p-2.5"
+          // eslint-disable-next-line react/forbid-component-props
+          style={{ backgroundColor: bg, color }}
+        >
+          <Icon className="h-4 w-4" />
+        </div>
+        <span className="text-xs text-muted-foreground font-medium">{label}</span>
+      </div>
+      {loading ? (
+        <div className="h-8 w-20 rounded-md bg-muted animate-pulse" />
+      ) : (
+        <>
+          <p className="text-3xl font-bold text-foreground">{value}</p>
+          {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 const DashboardPage = () => {
-  const { books = [] } = useBooks();
+  const { books = [], allBooks: allBooksRaw = [], loading: booksLoading } = useBooks();
+
   const [totalUsers, setTotalUsers] = useState(0);
+  const [totalReviews, setTotalReviews] = useState(0);
+  const [totalFavorites, setTotalFavorites] = useState(0);
+  const [totalViews, setTotalViews] = useState(0);
+  const [recentReviews, setRecentReviews] = useState<RecentReview[]>([]);
+  const [interactionStats, setInteractionStats] = useState<InteractionStat[]>([]);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // ================= USERS =================
-  useEffect(() => {
-    const loadUsers = async () => {
-      const { data, error } = await (supabase as any).rpc("get_user_count");
-      if (error) {
-        console.error("Error loading users:", error);
-        return;
-      }
+  const visibleBooks = useMemo(() => books.filter((b) => !b.isHidden), [books]);
+  // allBooksRaw includes hidden books — used for hidden count stat
+  const hiddenCount = allBooksRaw.filter((b) => b.isHidden).length;
 
-      setTotalUsers(data ?? 0);
-    };
-
-    loadUsers();
-  }, []);
-
-  // ================= STATS =================
-  const mangaCount = useMemo(
-    () => books.filter((b) => b.type === "manga").length,
-    [books]
-  );
-
-  const novelCount = useMemo(
-    () => books.filter((b) => b.type === "novel").length,
-    [books]
-  );
-
-  const lightNovelCount = useMemo(
-    () => books.filter((b) => b.type === "light-novel").length,
-    [books]
-  );
-
-  const avgRating = useMemo(() => {
-    const rated = books.filter((b) => (b.rating ?? 0) > 0);
-    if (!rated.length) return 0;
-    const total = rated.reduce((s, b) => s + (b.rating ?? 0), 0);
-    return +(total / rated.length).toFixed(1);
-  }, [books]);
-
-  const newCount = useMemo(
-    () => books.filter((b) => b.isNew === true).length,
-    [books]
-  );
-
-  const popularCount = useMemo(
-    () => books.filter((b) => b.isPopular === true).length,
-    [books]
-  );
-
-  // ================= TOP RATED =================
-  const topRated = useMemo(() => {
-    return [...books]
-      .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
-      .slice(0, 5);
-  }, [books]);
-
-  // ================= GENRE (จาก tags) =================
-  const genreCounts = useMemo(() => {
-    const genreMap = new Map<string, number>();
-
+  // bookID → book lookup (number key for reliable matching)
+  const bookByNumId = useMemo(() => {
+    const m = new Map<number, typeof books[0]>();
     books.forEach((b) => {
-      // ใช้ทั้ง genres และ tags
-      const allTags = [...(b.genres ?? []), ...(b.tags ?? [])];
-
-      const normalize = (t: string) =>
-        t.replace(/\s+/g, " ").trim();
-
-      const unique = [...new Set(allTags.map((t) => normalize(String(t))))];
-
-      unique.forEach((g) => {
-        const key = normalize(g);
-        genreMap.set(key, (genreMap.get(g) || 0) + 1);
-      });
+      const id = Number(b.bookID ?? b.id);
+      if (!isNaN(id)) m.set(id, b);
     });
-
-    return [...genreMap.entries()]
-      .map(([genre, count]) => ({ genre, count }))
-      .sort((a, b) => b.count - a.count);
+    return m;
   }, [books]);
 
-  const maxGenreCount = genreCounts[0]?.count || 1;
-  const totalBooks = books.length || 0;
+  const loadStats = async () => {
+    setStatsLoading(true);
+    try {
+      const db = supabase as any;
 
-  // deterministic color for a genre based on its string
-  const genreColors = [
-    "#7c3aed",
-    "#60a5fa",
-    "#34d399",
-    "#fb7185",
-    "#f59e0b",
-    "#f97316",
-    "#ef4444",
-    "#06b6d4",
-    "#a78bfa",
-    "#10b981",
-  ];
+      const [
+        { data: userCountData },
+        { data: reviewData },
+        { data: statsData },
+      ] = await Promise.all([
+        db.rpc("get_user_count"),
+        db.from("review")
+          .select("reviewID, rating, comment, createdAt, user_id, bookID")
+          .order("createdAt", { ascending: false })
+          .limit(5),
+        db.from("book_interaction_stats").select("*"),
+      ]);
 
-  const getGenreColor = (genre: string) => {
-    let h = 0;
-    for (let i = 0; i < genre.length; i++) {
-      h = (h << 5) - h + genre.charCodeAt(i);
-      h |= 0;
+      setTotalUsers(userCountData ?? 0);
+      setRecentReviews(reviewData ?? []);
+      setInteractionStats(statsData ?? []);
+
+      const stats = statsData ?? [];
+      setTotalFavorites(stats.reduce((s: number, r: any) => s + Number(r.favoriteCount ?? 0), 0));
+      setTotalViews(stats.reduce((s: number, r: any) => s + Number(r.viewCount ?? 0), 0));
+      setTotalReviews(stats.reduce((s: number, r: any) => s + Number(r.reviewCount ?? 0), 0));
+    } catch (err) {
+      console.error("Dashboard stats error:", err);
+    } finally {
+      setStatsLoading(false);
     }
-    return genreColors[Math.abs(h) % genreColors.length];
   };
 
-  // ================= STAT CARDS =================
-  const statCards = [
-    {
-      label: "หนังสือทั้งหมด",
-      value: books.length,
-      icon: BookOpen,
-      color: "text-primary",
-      bg: "bg-primary/10",
-    },
-    {
-      label: "มังงะ",
-      value: mangaCount,
-      icon: BookOpen,
-      color: "text-violet-500",
-      bg: "bg-violet-50",
-    },
-    {
-      label: "นิยาย",
-      value: novelCount,
-      icon: BookOpen,
-      color: "text-emerald-500",
-      bg: "bg-emerald-50",
-    },
-    {
-      label: "ไลท์โนเวล",
-      value: lightNovelCount,
-      icon: BookOpen,
-      color: "text-pink-500",
-      bg: "bg-pink-50",
-    },
-    {
-      label: "ผู้ใช้ทั้งหมด",
-      value: totalUsers,
-      icon: Users,
-      color: "text-blue-500",
-      bg: "bg-blue-50",
-    },
-    {
-      label: "คะแนนเฉลี่ย",
-      value: avgRating,
-      icon: Star,
-      color: "text-amber-500",
-      bg: "bg-amber-50",
-    },
-    {
-      label: "มาใหม่",
-      value: newCount,
-      icon: Sparkles,
-      color: "text-cyan-500",
-      bg: "bg-cyan-50",
-    },
-    {
-      label: "ยอดนิยม",
-      value: popularCount,
-      icon: TrendingUp,
-      color: "text-orange-500",
-      bg: "bg-orange-50",
-    },
-  ];
+  useEffect(() => { loadStats(); }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadStats();
+    setRefreshing(false);
+  };
+
+  // ── Derived counts ────────────────────────────────────────────────────────
+  const mangaCount = useMemo(() => visibleBooks.filter((b) => b.type === "manga").length, [visibleBooks]);
+  const novelCount = useMemo(() => visibleBooks.filter((b) => b.type === "novel").length, [visibleBooks]);
+  const lightNovelCount = useMemo(() => visibleBooks.filter((b) => b.type === "light-novel").length, [visibleBooks]);
+
+  const avgRating = useMemo(() => {
+    const statsMap = new Map(interactionStats.map((s) => [s.bookID, s]));
+    const rated = visibleBooks.filter((b) => {
+      const s = statsMap.get(Number(b.bookID ?? b.id));
+      return Number(s?.reviewCount ?? 0) > 0;
+    });
+    if (!rated.length) return "—";
+    const total = rated.reduce((sum, b) => {
+      const s = statsMap.get(Number(b.bookID ?? b.id));
+      return sum + Number(s?.rating ?? b.rating ?? 0);
+    }, 0);
+    return (total / rated.length).toFixed(1);
+  }, [visibleBooks, interactionStats]);
+
+  // ── Genre counts (deduplicated per book) ─────────────────────────────────
+  const genreCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    visibleBooks.forEach((b) => {
+      const seen = new Set<string>();
+      (b.tags ?? []).forEach((t: string) => {
+        const key = t.trim();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        map.set(key, (map.get(key) ?? 0) + 1);
+      });
+    });
+    return [...map.entries()]
+      .map(([genre, count]) => ({ genre, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+  }, [visibleBooks]);
+
+  const maxGenreCount = genreCounts[0]?.count || 1;
+
+  // ── Top books by interaction score ───────────────────────────────────────
+  const topBooks = useMemo(() => {
+    const statsMap = new Map(interactionStats.map((s) => [s.bookID, s]));
+    return [...visibleBooks]
+      .map((b) => {
+        const s = statsMap.get(Number(b.bookID ?? b.id));
+        const score =
+          Number(s?.favoriteCount ?? 0) * 5 +
+          Number(s?.reviewActionCount ?? 0) * 4.5 +
+          Number(s?.viewCount ?? 0) * 0.1;
+        return { book: b, stat: s, score };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  }, [visibleBooks, interactionStats]);
+
+  // ── Top rated (≥1 real review) ───────────────────────────────────────────
+  const topRatedBooks = useMemo(() => {
+    const statsMap = new Map(interactionStats.map((s) => [s.bookID, s]));
+    return [...visibleBooks]
+      .filter((b) => Number(statsMap.get(Number(b.bookID ?? b.id))?.reviewCount ?? 0) >= 1)
+      .sort((a, b) => {
+        const rA = Number(statsMap.get(Number(a.bookID ?? a.id))?.rating ?? 0);
+        const rB = Number(statsMap.get(Number(b.bookID ?? b.id))?.rating ?? 0);
+        return rB - rA;
+      })
+      .slice(0, 5);
+  }, [visibleBooks, interactionStats]);
+
+  const isLoading = booksLoading || statsLoading;
 
   return (
     <div className="container py-8 space-y-8">
-      {/* HEADER */}
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold font-display flex items-center gap-2">
+            <BarChart3 className="h-8 w-8 text-primary" />
+            Dashboard
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">ภาพรวมระบบ BookRec</p>
+        </div>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          รีเฟรช
+        </button>
+      </div>
+
+      {/* Row 1: คลังหนังสือ */}
       <div>
-        <h1 className="text-3xl font-bold font-display flex items-center gap-2">
-          <BarChart3 className="h-8 w-8 text-primary" />
-          Dashboard
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          ภาพรวมระบบ BookRec
-        </p>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">คลังหนังสือ</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <StatCard label="หนังสือทั้งหมด" value={visibleBooks.length}
+            sub={hiddenCount > 0 ? `${hiddenCount} เล่มถูกซ่อน` : undefined}
+            icon={BookOpen} color="#378ADD" bg="#E6F1FB" loading={isLoading} />
+          <StatCard label="มังงะ" value={mangaCount}
+            icon={BookOpen} color="#7F77DD" bg="#EEEDFE" loading={isLoading} />
+          <StatCard label="นิยาย" value={novelCount}
+            icon={BookOpen} color="#1D9E75" bg="#E1F5EE" loading={isLoading} />
+          <StatCard label="ไลท์โนเวล" value={lightNovelCount}
+            icon={Sparkles} color="#D4537E" bg="#FBEAF0" loading={isLoading} />
+        </div>
       </div>
 
-      {/* ================= STAT CARDS ================= */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {statCards.map((s) => (
-          <div
-            key={s.label}
-            className="rounded-xl border bg-card p-5 shadow-card hover:shadow-card-hover transition-all"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div className={`rounded-lg p-2 ${s.bg}`}>
-                <s.icon className={`h-4 w-4 ${s.color}`} />
-              </div>
-              <span className="text-xs text-muted-foreground">
-                {s.label}
-              </span>
-            </div>
-            <p className="text-3xl font-bold">{s.value}</p>
-          </div>
-        ))}
+      {/* Row 2: การมีส่วนร่วม */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">การมีส่วนร่วม</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <StatCard label="ผู้ใช้ทั้งหมด" value={totalUsers}
+            icon={Users} color="#378ADD" bg="#E6F1FB" loading={statsLoading} />
+          <StatCard label="คะแนนเฉลี่ย" value={avgRating}
+            sub="เฉพาะเล่มที่มีรีวิว"
+            icon={Star} color="#BA7517" bg="#FAEEDA" loading={isLoading} />
+          <StatCard label="รีวิวทั้งหมด" value={totalReviews}
+            icon={MessageSquare} color="#1D9E75" bg="#E1F5EE" loading={statsLoading} />
+          <StatCard label="ยอดวิวรวม" value={totalViews.toLocaleString()}
+            icon={Eye} color="#7F77DD" bg="#EEEDFE" loading={statsLoading} />
+        </div>
       </div>
 
-      {/* ================= MAIN ================= */}
+      {/* Row 3: Genre chart + Top rated */}
       <div className="grid gap-6 lg:grid-cols-2">
 
-        {/* ================= GENRE ================= */}
+        {/* Genre chart */}
         <div className="rounded-xl border bg-card p-6 shadow-card">
-          <h2 className="text-lg font-bold mb-4">📊 สัดส่วนแนวหนังสือ</h2>
-
-          <div className="space-y-3">
-            {genreCounts.map(({ genre, count }) => {
-              const percent = totalBooks > 0 ? Math.round((count / totalBooks) * 100) : 0;
-              const color = getGenreColor(genre);
-
-              return (
-                <div key={genre} className="flex items-center gap-3">
-                  <span className="w-24 text-sm text-muted-foreground truncate">
-                    {genre}
-                  </span>
-                  <div
-                    className="flex-1 h-5 rounded-full bg-muted overflow-hidden"
-                    role="progressbar"
-                    aria-label={`แนว ${genre}`}
-                  >
-                    <div
-                      className="h-full rounded-full progress-bar transition-all duration-300"
-                      style={
-                        {
-                          width: `${percent}%`,
-                          background: `linear-gradient(90deg, ${color}, ${color}99)`,
-                        }
-                      }
-                    />
+          <h2 className="text-base font-semibold mb-5 flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-primary" />
+            สัดส่วนแนวหนังสือ
+          </h2>
+          <div className="space-y-2.5">
+            {isLoading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-20 h-3 rounded bg-muted animate-pulse" />
+                    <div className="flex-1 h-5 rounded-full bg-muted animate-pulse" />
+                    <div className="w-6 h-3 rounded bg-muted animate-pulse" />
                   </div>
-
-                  <span className="text-sm font-medium w-12 text-right">
-                    {count}
-                  </span>
-                </div>
-              );
-            })}
-
-            {genreCounts.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                ยังไม่มีข้อมูลแนวหนังสือ
-              </p>
+                ))
+              : genreCounts.map(({ genre, count }, i) => {
+                  const pct = Math.round((count / maxGenreCount) * 100);
+                  const color = getColor(i);
+                  return (
+                    <div key={genre} className="flex items-center gap-3">
+                      <span className="w-24 text-xs text-muted-foreground truncate text-right" title={genre}>
+                        {genre}
+                      </span>
+                      <div className="flex-1 h-5 rounded-full bg-secondary overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          // eslint-disable-next-line react/forbid-component-props
+                          style={{ width: `${pct}%`, backgroundColor: color }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold text-foreground w-6 text-right">{count}</span>
+                    </div>
+                  );
+                })}
+            {!isLoading && genreCounts.length === 0 && (
+              <p className="text-sm text-muted-foreground py-4 text-center">ยังไม่มีข้อมูล</p>
             )}
           </div>
         </div>
 
-        {/* ================= TOP RATED ================= */}
+        {/* Top rated */}
         <div className="rounded-xl border bg-card p-6 shadow-card">
-          <h2 className="text-lg font-bold mb-4">⭐ หนังสือคะแนนสูงสุด</h2>
-
+          <h2 className="text-base font-semibold mb-5 flex items-center gap-2">
+            <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+            หนังสือคะแนนสูงสุด
+            <span className="text-xs font-normal text-muted-foreground ml-1">(จากรีวิวจริง)</span>
+          </h2>
           <div className="space-y-3">
-            {topRated.map((book, i) => (
-              <div
-                key={book.id}
-                className="flex items-center gap-3 rounded-lg bg-muted/40 px-4 py-3"
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                  {i + 1}
-                </span>
-
-                <img
-                  src={book.coverUrl || "/placeholder.svg"}
-                  alt={book.title}
-                  className="h-10 w-7 rounded object-cover shrink-0"
-                />
-
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{book.title}</p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {book.authorName || book.author || "ไม่ระบุผู้แต่ง"}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                  <span className="text-sm font-bold">{book.rating ?? 0}</span>
-                </div>
-              </div>
-            ))}
-
-            {topRated.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                ยังไม่มีข้อมูลหนังสือ
-              </p>
+            {isLoading
+              ? Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 rounded-lg p-2">
+                    <div className="h-7 w-7 rounded-full bg-muted animate-pulse" />
+                    <div className="h-10 w-7 rounded bg-muted animate-pulse" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3.5 w-full rounded bg-muted animate-pulse" />
+                      <div className="h-3 w-2/3 rounded bg-muted animate-pulse" />
+                    </div>
+                  </div>
+                ))
+              : topRatedBooks.map((book, i) => {
+                  const stat = interactionStats.find(
+                    (s) => s.bookID === Number(book.bookID ?? book.id)
+                  );
+                  const rating = Number(stat?.rating ?? book.rating ?? 0);
+                  return (
+                    <div key={book.id} className="flex items-center gap-3 rounded-lg bg-muted/40 px-3 py-2.5 hover:bg-muted/70 transition-colors">
+                      <span
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                          i === 0
+                            ? "bg-amber-100 text-amber-700"
+                            : i === 1
+                            ? "bg-gray-100 text-gray-600"
+                            : "bg-blue-100 text-blue-700"
+                        }`}
+                      >
+                        {i + 1}
+                      </span>
+                      <img src={book.coverUrl || "/placeholder.svg"} alt={book.title}
+                        className="h-10 w-7 rounded object-cover shrink-0 shadow-sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{book.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {book.authorName || "—"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                        <span className="text-sm font-bold text-foreground">{rating.toFixed(1)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+            {!isLoading && topRatedBooks.length === 0 && (
+              <p className="text-sm text-muted-foreground py-4 text-center">ยังไม่มีหนังสือที่ถูกรีวิว</p>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* Row 4: Most interacted + Recent reviews */}
+      <div className="grid gap-6 lg:grid-cols-2">
+
+        {/* Most interacted */}
+        <div className="rounded-xl border bg-card p-6 shadow-card">
+          <h2 className="text-base font-semibold mb-5 flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-primary" />
+            หนังสือยอดนิยม
+            <span className="text-xs font-normal text-muted-foreground ml-1">(จาก interaction score)</span>
+          </h2>
+          <div className="space-y-3">
+            {isLoading
+              ? Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2">
+                    <div className="h-10 w-7 rounded bg-muted animate-pulse" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3.5 w-full rounded bg-muted animate-pulse" />
+                      <div className="h-3 w-1/2 rounded bg-muted animate-pulse" />
+                    </div>
+                  </div>
+                ))
+              : topBooks.map(({ book, stat }) => {
+                  const fav = Number(stat?.favoriteCount ?? 0);
+                  const rev = Number(stat?.reviewActionCount ?? 0);
+                  const view = Number(stat?.viewCount ?? 0);
+                  return (
+                    <div key={book.id} className="flex items-center gap-3 rounded-lg hover:bg-muted/40 px-2 py-2 transition-colors">
+                      <img src={book.coverUrl || "/placeholder.svg"} alt={book.title}
+                        className="h-10 w-7 rounded object-cover shrink-0 shadow-sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{book.title}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {fav > 0 && (
+                            <span className="flex items-center gap-0.5 text-[11px] text-red-500">
+                              <Heart className="h-2.5 w-2.5 fill-current" />{fav}
+                            </span>
+                          )}
+                          {rev > 0 && (
+                            <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground">
+                              <MessageSquare className="h-2.5 w-2.5" />{rev}
+                            </span>
+                          )}
+                          {view > 0 && (
+                            <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground">
+                              <Eye className="h-2.5 w-2.5" />{view}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {stat?.rating && Number(stat.rating) > 0 && (
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                          <span className="text-xs font-semibold text-foreground">
+                            {Number(stat.rating).toFixed(1)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            {!isLoading && topBooks.length === 0 && (
+              <p className="text-sm text-muted-foreground py-4 text-center">ยังไม่มีข้อมูล interaction</p>
+            )}
+          </div>
+        </div>
+
+        {/* Recent reviews — ใช้ bookByNumId map แทน find() */}
+        <div className="rounded-xl border bg-card p-6 shadow-card">
+          <h2 className="text-base font-semibold mb-5 flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-primary" />
+            รีวิวล่าสุด
+          </h2>
+          <div className="space-y-3">
+            {statsLoading
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="flex gap-3 p-2">
+                    <div className="h-10 w-7 rounded bg-muted animate-pulse shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3.5 w-3/4 rounded bg-muted animate-pulse" />
+                      <div className="h-3 w-full rounded bg-muted animate-pulse" />
+                    </div>
+                  </div>
+                ))
+              : recentReviews.length > 0
+              ? recentReviews.map((r) => {
+                  // ✅ match by number key — reliable even if bookID is 0
+                  const book = bookByNumId.get(Number(r.bookID));
+                  return (
+                    <div key={r.reviewID} className="flex gap-3 rounded-lg hover:bg-muted/40 px-2 py-2 transition-colors">
+                      {book?.coverUrl ? (
+                        <img src={book.coverUrl} alt={book.title}
+                          className="h-10 w-7 rounded object-cover shrink-0 shadow-sm" />
+                      ) : (
+                        <div className="h-10 w-7 rounded bg-muted shrink-0 flex items-center justify-center">
+                          <BookOpen className="h-3 w-3 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          {book?.title ?? "—"}
+                        </p>
+                        <div className="flex gap-0.5 mt-0.5 mb-1">
+                          {[1, 2, 3, 4, 5].map((s) => (
+                            <Star key={s}
+                              className={`h-3 w-3 ${s <= (r.rating ?? 0) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
+                            />
+                          ))}
+                        </div>
+                        {r.comment && (
+                          <p className="text-xs text-muted-foreground line-clamp-1">{r.comment}</p>
+                        )}
+                        <p className="text-[11px] text-muted-foreground/60 mt-0.5">
+                          {r.createdAt
+                            ? new Date(r.createdAt).toLocaleDateString("th-TH", {
+                                year: "numeric", month: "short", day: "numeric",
+                              })
+                            : ""}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
+              : (
+                <p className="text-sm text-muted-foreground py-4 text-center">ยังไม่มีรีวิว</p>
+              )}
           </div>
         </div>
       </div>

@@ -24,13 +24,33 @@ type ReviewItem = {
 
 const REVIEWS_PER_PAGE = 6;
 
+// ✅ Strip cache-busting query string before saving to DB
+function cleanAvatarUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    u.searchParams.delete("t");
+    return u.toString();
+  } catch {
+    return url.split("?")[0];
+  }
+}
+
+// ✅ Add cache-busting for display only
+function displayAvatarUrl(url: string): string {
+  if (!url) return "";
+  const base = cleanAvatarUrl(url);
+  return `${base}?t=${Date.now()}`;
+}
+
 const ProfilePage = () => {
   const { user, profile, loading, refreshProfile } = useAuth();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [displayName, setDisplayName] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState(""); // ✅ always stores clean URL (no ?t=)
+  const [avatarDisplayUrl, setAvatarDisplayUrl] = useState(""); // ✅ display URL with cache-bust
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -43,7 +63,10 @@ const ProfilePage = () => {
   useEffect(() => {
     if (profile) {
       setDisplayName(profile.display_name || "");
-      setAvatarUrl(profile.avatar_url ? `${profile.avatar_url}?t=${Date.now()}` : "");
+      // ✅ store clean URL in state, show cache-busted URL for display
+      const clean = cleanAvatarUrl(profile.avatar_url || "");
+      setAvatarUrl(clean);
+      setAvatarDisplayUrl(clean ? displayAvatarUrl(clean) : "");
     }
   }, [profile]);
 
@@ -89,13 +112,7 @@ const ProfilePage = () => {
     const fetchTags = async () => {
       const { data, error } = await supabase
         .from("user_tags")
-        .select(`
-          tagID,
-          tag:tagID (
-            tagName,
-            tagType
-          )
-        `)
+        .select(`tagID, tag:tagID (tagName, tagType)`)
         .eq("user_id", user.id);
 
       if (error) {
@@ -106,9 +123,9 @@ const ProfilePage = () => {
 
       const names =
         data
-        ?.filter((item: any) => item.tag?.tagType === "genre")
-        .map((item: any) => item.tag?.tagName)
-        .filter(Boolean) || [];
+          ?.filter((item: any) => item.tag?.tagType === "genre")
+          .map((item: any) => item.tag?.tagName)
+          .filter(Boolean) || [];
 
       setInterestTags(names);
     };
@@ -118,7 +135,6 @@ const ProfilePage = () => {
 
   const stats = useMemo(() => {
     const reviewCount = reviews.length;
-
     const avgRating =
       reviewCount > 0
         ? (
@@ -126,12 +142,7 @@ const ProfilePage = () => {
             reviewCount
           ).toFixed(1)
         : "0.0";
-
-    return {
-      reviewCount,
-      avgRating,
-      topGenres: interestTags,
-    };
+    return { reviewCount, avgRating, topGenres: interestTags };
   }, [reviews, interestTags]);
 
   const totalPages = Math.ceil(reviews.length / REVIEWS_PER_PAGE);
@@ -155,14 +166,12 @@ const ProfilePage = () => {
       toast({ title: "กรุณาเลือกไฟล์รูปภาพ", variant: "destructive" });
       return;
     }
-
     if (file.size > 5 * 1024 * 1024) {
       toast({ title: "ไฟล์ต้องไม่เกิน 5MB", variant: "destructive" });
       return;
     }
 
     setUploading(true);
-
     try {
       const ext = file.name.split(".").pop();
       const path = `${user.id}/avatar.${ext}`;
@@ -174,7 +183,11 @@ const ProfilePage = () => {
       if (error) throw error;
 
       const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-      setAvatarUrl(`${data.publicUrl}?t=${Date.now()}`);
+
+      // ✅ store clean URL, show cache-busted for immediate display
+      const clean = cleanAvatarUrl(data.publicUrl);
+      setAvatarUrl(clean);
+      setAvatarDisplayUrl(displayAvatarUrl(clean));
 
       toast({ title: "อัปโหลดรูปโปรไฟล์สำเร็จ ✅" });
     } catch (err: any) {
@@ -195,19 +208,26 @@ const ProfilePage = () => {
     }
 
     setSaving(true);
-
     try {
       const cleanName = displayName.trim();
+      // ✅ always save clean URL (no ?t=) to DB
+      const cleanUrl = cleanAvatarUrl(avatarUrl);
+
+      const { data: existingProfile } = await supabase
+       .from("profiles")
+       .select("avatar_url")
+       .eq("userID", user.id)
+       .maybeSingle();
 
       const { error: profileError } = await supabase.from("profiles").upsert(
         {
           userID: user.id,
           display_name: cleanName,
-          avatar_url: avatarUrl || null,
+          // ✅ ถ้ามี avatar อยู่แล้วใน DB ให้ใช้อันนั้น ไม่ทับด้วย Google
+          avatar_url: cleanUrl,
         },
         { onConflict: "userID" }
       );
-
       if (profileError) throw profileError;
 
       const { error: userError } = await supabase
@@ -218,7 +238,6 @@ const ProfilePage = () => {
           updated_at: new Date().toISOString(),
         })
         .eq("id", user.id);
-
       if (userError) throw userError;
 
       await refreshProfile();
@@ -248,12 +267,18 @@ const ProfilePage = () => {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+        {/* Left card */}
         <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
           <div className="flex flex-col items-center gap-4">
             <div className="group relative">
               <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-primary/20 bg-muted transition group-hover:scale-105">
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="รูปโปรไฟล์" className="h-full w-full object-cover" />
+                {avatarDisplayUrl ? (
+                  <img
+                    src={avatarDisplayUrl}
+                    alt="รูปโปรไฟล์"
+                    className="h-full w-full object-cover"
+                    onError={() => setAvatarDisplayUrl("")}
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center">
                     <User className="h-12 w-12 text-muted-foreground" />
@@ -302,16 +327,11 @@ const ProfilePage = () => {
 
           <div className="mt-6 grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 text-center">
-              <div className="text-2xl font-bold text-foreground">
-                {stats.reviewCount}
-              </div>
+              <div className="text-2xl font-bold text-foreground">{stats.reviewCount}</div>
               <div className="mt-1 text-xs text-muted-foreground">รีวิว</div>
             </div>
-
             <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 text-center">
-              <div className="text-2xl font-bold text-foreground">
-                {stats.avgRating}
-              </div>
+              <div className="text-2xl font-bold text-foreground">{stats.avgRating}</div>
               <div className="mt-1 text-xs text-muted-foreground">คะแนนเฉลี่ย</div>
             </div>
 
@@ -319,7 +339,6 @@ const ProfilePage = () => {
               <p className="text-xs font-semibold text-muted-foreground">
                 แนวหนังสือที่สนใจ
               </p>
-
               <button
                 type="button"
                 onClick={() => setShowGenreModal(true)}
@@ -327,7 +346,6 @@ const ProfilePage = () => {
               >
                 แก้ไขแนวที่ชอบ
               </button>
-
               {stats.topGenres.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {stats.topGenres.slice(0, 4).map((genre) => (
@@ -348,6 +366,7 @@ const ProfilePage = () => {
           </div>
         </div>
 
+        {/* Right card */}
         <div className="rounded-3xl border border-border bg-card p-6 shadow-sm space-y-5">
           <div>
             <h2 className="text-lg font-semibold text-foreground">ข้อมูลโปรไฟล์</h2>
@@ -420,12 +439,10 @@ const ProfilePage = () => {
                     alt={r.book?.title || "หนังสือ"}
                     className="h-24 w-16 rounded-lg object-cover flex-shrink-0"
                   />
-
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <p className="font-semibold text-foreground line-clamp-1">
                       {r.book?.title || "ไม่ทราบชื่อ"}
                     </p>
-
                     <div className="flex items-center gap-0.5">
                       {[1, 2, 3, 4, 5].map((s) => (
                         <Star
@@ -441,13 +458,11 @@ const ProfilePage = () => {
                         {r.rating}/5
                       </span>
                     </div>
-
                     {r.comment && (
                       <p className="text-sm text-muted-foreground line-clamp-2">
                         {r.comment}
                       </p>
                     )}
-
                     <p className="text-xs text-muted-foreground">
                       {r.createdAt
                         ? new Date(r.createdAt).toLocaleDateString("th-TH", {
@@ -462,7 +477,6 @@ const ProfilePage = () => {
               ))}
             </div>
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-2 pt-2">
                 <button
@@ -472,7 +486,6 @@ const ProfilePage = () => {
                 >
                   ← ก่อนหน้า
                 </button>
-
                 <div className="flex items-center gap-1">
                   {Array.from({ length: totalPages }).map((_, i) => (
                     <button
@@ -488,7 +501,6 @@ const ProfilePage = () => {
                     </button>
                   ))}
                 </div>
-
                 <button
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}

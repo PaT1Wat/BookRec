@@ -108,11 +108,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    const { data: existingProfile } = await supabase
+      .from("profiles")
+      .select("avatar_url")
+      .eq("userID", authUser.id)
+      .maybeSingle();
+
     const { error: profileError } = await supabase.from("profiles").upsert(
       {
         userID: authUser.id,
         display_name: displayName,
-        avatar_url: avatarUrl,
+        // ✅ ถ้ามี avatar อยู่แล้วใน DB ให้ใช้อันนั้น ไม่ทับด้วย Google
+        avatar_url: existingProfile?.avatar_url ?? avatarUrl,
       },
       { onConflict: "userID" }
     );

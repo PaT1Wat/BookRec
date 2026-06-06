@@ -14,7 +14,7 @@ type FormData = {
   price: number; coverUrl: string;
   type: string; genres: string[]; tags: string; description: string;
   isNew: boolean; isHidden: boolean;
-  publishDate?: string; // ← เพิ่ม publishDate ในฟอร์มด้วย
+  publishDate?: string;
 };
 
 type UserRow = {
@@ -33,10 +33,8 @@ type ReviewWithBook = {
 const emptyForm: FormData = {
   title: "", titleEn: "", authorName: "", publisherName: "",
   price: 0, coverUrl: "", type: "manga",
-  genres: [], tags: "", description: "", 
-  isNew: false,
-  isHidden: false,
-  publishDate: "", // ← เพิ่ม default publishDate เป็น empty string
+  genres: [], tags: "", description: "",
+  isNew: false, isHidden: false, publishDate: "",
 };
 
 const GENRE_LIST = [
@@ -99,11 +97,8 @@ const AdminPage = () => {
   const [reviewSearch, setReviewSearch] = useState("");
   const [userSubTab, setUserSubTab] = useState<"members" | "reviews">("members");
 
-  // ✅ Pagination รีวิว
   const [reviewPage, setReviewPage] = useState(1);
   const REVIEWS_PER_PAGE = 15;
-
-  // ✅ Confirm ลบรีวิว
   const [deleteReviewConfirm, setDeleteReviewConfirm] = useState<number | null>(null);
 
   useEffect(() => {
@@ -169,29 +164,36 @@ const AdminPage = () => {
   if (authLoading) return <div className="p-10 text-center">กำลังโหลด...</div>;
   if (!isAdmin) return <div className="p-10 text-center text-red-500">❌ คุณไม่มีสิทธิ์เข้าหน้านี้</div>;
 
-  // ── helpers ──
   const getBookId = (b: any) => Number((b as any).bookID ?? b.id);
-  const countHasData   = allBooks.filter(b => (bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
-  const countDeletable = allBooks.filter(b => !(bookInteractions.get(getBookId(b)) ?? false) && !(b.isHidden ?? false)).length;
+
+  // ✅ FIX: count active (non-hidden) books only for clearer badge labels
+  const activeBooks = allBooks.filter(b => !(b.isHidden ?? false));
+  const countHasData   = activeBooks.filter(b => bookInteractions.get(getBookId(b)) ?? false).length;
+  const countDeletable = activeBooks.filter(b => !(bookInteractions.get(getBookId(b)) ?? false)).length;
   const countHidden    = allBooks.filter(b => b.isHidden ?? false).length;
 
-  const filtered = allBooks.filter(book => {
-    const matchSearch = (book.title || "").toLowerCase().includes(search.toLowerCase());
-    const hasInteraction = bookInteractions.get(getBookId(book)) ?? false;
-    const isHidden = book.isHidden ?? false;
-    const matchStatus =
-      statusFilter === "all"       ? true
-      : statusFilter === "hasData"   ? hasInteraction && !isHidden
-      : statusFilter === "deletable" ? !hasInteraction && !isHidden
-      : isHidden;
-    return matchSearch && matchStatus;
-  });
-  
+  // ✅ FIX: sort so hidden books appear at the bottom in "all" view
+  const filtered = allBooks
+    .filter(book => {
+      const matchSearch = (book.title || "").toLowerCase().includes(search.toLowerCase());
+      const hasInteraction = bookInteractions.get(getBookId(book)) ?? false;
+      const isHidden = book.isHidden ?? false;
+      const matchStatus =
+        statusFilter === "all"       ? true
+        : statusFilter === "hasData"   ? hasInteraction && !isHidden
+        : statusFilter === "deletable" ? !hasInteraction && !isHidden
+        : isHidden;
+      return matchSearch && matchStatus;
+    })
+    .sort((a, b) => {
+      // hidden always go to bottom in "all" view
+      if (statusFilter !== "all") return 0;
+      return (a.isHidden ? 1 : 0) - (b.isHidden ? 1 : 0);
+    });
 
   const totalPages = Math.ceil(filtered.length / BOOKS_PER_PAGE);
   const paginatedBooks = filtered.slice((currentPage - 1) * BOOKS_PER_PAGE, currentPage * BOOKS_PER_PAGE);
 
-  // ✅ Reviews: filter + pagination
   const filteredReviews = allReviews.filter(r =>
     !reviewSearch ||
     r.book?.title?.toLowerCase().includes(reviewSearch.toLowerCase()) ||
@@ -199,8 +201,7 @@ const AdminPage = () => {
   );
   const totalReviewPages = Math.ceil(filteredReviews.length / REVIEWS_PER_PAGE);
   const paginatedReviews = filteredReviews.slice(
-    (reviewPage - 1) * REVIEWS_PER_PAGE,
-    reviewPage * REVIEWS_PER_PAGE
+    (reviewPage - 1) * REVIEWS_PER_PAGE, reviewPage * REVIEWS_PER_PAGE
   );
 
   const toggleGenre = (g: string) => setForm(prev => ({
@@ -234,16 +235,9 @@ const AdminPage = () => {
     const tagsArray = form.tags.split(",").map(t => t.trim()).filter(Boolean);
     const allTags = [...new Set([...form.genres, ...tagsArray])];
     try {
-      const payload = { 
-        ...form, 
-        tags: allTags, 
-        rating: 0, 
-        reviewCount: 0, 
-        isPopular: false,
-        ...(editingId ? {} : {
-          publishDate: new Date().toISOString(),
-          isNew: true,
-        }),
+      const payload = {
+        ...form, tags: allTags, rating: 0, reviewCount: 0, isPopular: false,
+        ...(editingId ? {} : { publishDate: new Date().toISOString(), isNew: true }),
       };
       if (editingId) { await updateBook(editingId, payload); toast({ title: "แก้ไขหนังสือสำเร็จ ✅" }); }
       else { await addBook(payload); toast({ title: "เพิ่มหนังสือสำเร็จ ✅" }); }
@@ -281,8 +275,7 @@ const AdminPage = () => {
         coverUrl: book.coverUrl, authorName: book.authorName || book.author,
         publisherName: book.publisherName || book.publisher, price: book.price,
         rating: 0, reviewCount: 0, type: book.type, tags: book.tags,
-        isNew: book.isNew ?? false, isPopular: false,
-        isHidden: false,
+        isNew: book.isNew ?? false, isPopular: false, isHidden: false,
       });
       setUnarchiveConfirm(null);
       toast({ title: "ยกเลิกการซ่อนหนังสือสำเร็จ ✅" });
@@ -291,7 +284,6 @@ const AdminPage = () => {
     }
   };
 
-  // ✅ ลบรีวิว
   const handleDeleteReview = async (reviewID: number) => {
     try {
       const db = supabase as any;
@@ -305,18 +297,17 @@ const AdminPage = () => {
     }
   };
 
-  // ── filter button config ──
+  // ✅ FIX: "ทั้งหมด" badge shows active books count (not including hidden)
   const filterBtns = [
-    { key: "all",       label: "ทั้งหมด",  count: allBooks.length, color: "blue" },
-    { key: "hasData",   label: "มีข้อมูล", count: countHasData,    color: "amber" },
-    { key: "deletable", label: "ลบได้",    count: countDeletable,  color: "green" },
-    { key: "hidden",    label: "ซ่อนไว้",  count: countHidden,     color: "gray" },
+    { key: "all",       label: "ทั้งหมด",  count: activeBooks.length, color: "blue" },
+    { key: "hasData",   label: "มีข้อมูล", count: countHasData,       color: "amber" },
+    { key: "deletable", label: "ลบได้",    count: countDeletable,     color: "green" },
+    { key: "hidden",    label: "ซ่อนไว้",  count: countHidden,        color: "gray" },
   ] as const;
 
   return (
     <div className="container py-8">
 
-      {/* ── Header + Tabs ── */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold">⚙️ จัดการระบบ</h1>
         <div className="mt-4 flex gap-2 border-b border-border">
@@ -337,13 +328,16 @@ const AdminPage = () => {
         </div>
       </div>
 
-      {/* ══════════════════════════════════
-          TAB: จัดการหนังสือ
-      ══════════════════════════════════ */}
+      {/* ══ TAB: จัดการหนังสือ ══ */}
       {activeTab === "books" && (
         <>
           <div className="mb-4 flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">ทั้งหมด {allBooks.length} เล่ม</p>
+            <p className="text-sm text-muted-foreground">
+              ทั้งหมด {activeBooks.length} เล่ม
+              {countHidden > 0 && (
+                <span className="ml-2 text-muted-foreground/60">({countHidden} ซ่อนอยู่)</span>
+              )}
+            </p>
             <Button onClick={openAdd} className="gap-2">
               <Plus className="h-4 w-4" /> เพิ่มหนังสือ
             </Button>
@@ -394,14 +388,22 @@ const AdminPage = () => {
                   const hasInteraction = bookInteractions.get(bookNumId) ?? false;
                   const isHidden = book.isHidden ?? false;
                   return (
-                    <tr key={book.id} className="border-t hover:bg-muted/30">
+                    // ✅ FIX: hidden books have distinct muted row style
+                    <tr key={book.id}
+                      className={`border-t transition-colors ${
+                        isHidden
+                          ? "bg-muted/20 opacity-60"
+                          : "hover:bg-muted/30"
+                      }`}>
                       <td className="px-4 py-3">
                         <img src={book.coverUrl || "/placeholder.svg"} alt={book.title}
-                          className={`h-14 w-10 object-cover rounded ${isHidden ? "opacity-40 grayscale" : ""}`} />
+                          className={`h-14 w-10 object-cover rounded ${isHidden ? "grayscale" : ""}`} />
                       </td>
                       <td className="px-4 py-3">
-                        <p className={`font-medium ${isHidden ? "text-muted-foreground line-through" : ""}`}>{book.title}</p>
-                        {isHidden && <span className="text-xs text-amber-600">ซ่อนอยู่</span>}
+                        <p className={`font-medium ${isHidden ? "text-muted-foreground line-through" : ""}`}>
+                          {book.title}
+                        </p>
+                        {isHidden && <span className="text-xs text-amber-600 font-medium">ซ่อนอยู่</span>}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{book.authorName || "-"}</td>
                       <td className="px-4 py-3 text-center">
@@ -496,9 +498,7 @@ const AdminPage = () => {
                       <button key={p} onClick={() => setCurrentPage(p as number)}
                         className={`min-w-[32px] rounded-md px-2 py-1 text-sm transition-colors ${
                           currentPage === p ? "bg-primary text-white" : "border border-border hover:bg-muted"
-                        }`}>
-                        {p}
-                      </button>
+                        }`}>{p}</button>
                     )
                   )}
               </div>
@@ -514,9 +514,7 @@ const AdminPage = () => {
         </>
       )}
 
-      {/* ══════════════════════════════════
-          TAB: จัดการผู้ใช้
-      ══════════════════════════════════ */}
+      {/* ══ TAB: จัดการผู้ใช้ ══ */}
       {activeTab === "users" && (
         <div className="space-y-6">
           {usersLoading ? (
@@ -597,21 +595,17 @@ const AdminPage = () => {
 
               {userSubTab === "reviews" && (
                 <div>
-                  {/* Search bar + count */}
                   <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
                     <div className="relative w-full sm:w-72">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        value={reviewSearch}
+                      <Input value={reviewSearch}
                         onChange={e => { setReviewSearch(e.target.value); setReviewPage(1); }}
                         placeholder="ค้นหาหนังสือหรือผู้ใช้..."
-                        className="pl-9 h-9 text-sm"
-                      />
+                        className="pl-9 h-9 text-sm" />
                     </div>
                     <p className="text-sm text-muted-foreground">{filteredReviews.length} รายการ</p>
                   </div>
 
-                  {/* Review list */}
                   <div className="space-y-2">
                     {paginatedReviews.map(r => (
                       <div key={r.reviewID} className="flex gap-3 rounded-xl border bg-card p-3 items-start">
@@ -636,19 +630,11 @@ const AdminPage = () => {
                             {r.createdAt ? new Date(r.createdAt).toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" }) : ""}
                           </p>
                         </div>
-
-                        {/* ✅ ปุ่มลบรีวิว */}
                         <div className="flex-shrink-0 flex items-center">
                           {deleteReviewConfirm === r.reviewID ? (
                             <div className="flex items-center gap-1">
-                              <Button size="sm" variant="destructive"
-                                onClick={() => handleDeleteReview(r.reviewID)}>
-                                ยืนยัน
-                              </Button>
-                              <Button size="sm" variant="ghost"
-                                onClick={() => setDeleteReviewConfirm(null)}>
-                                ยกเลิก
-                              </Button>
+                              <Button size="sm" variant="destructive" onClick={() => handleDeleteReview(r.reviewID)}>ยืนยัน</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setDeleteReviewConfirm(null)}>ยกเลิก</Button>
                             </div>
                           ) : (
                             <Button size="icon" variant="ghost" title="ลบรีวิว"
@@ -659,20 +645,15 @@ const AdminPage = () => {
                         </div>
                       </div>
                     ))}
-
                     {filteredReviews.length === 0 && (
                       <div className="py-10 text-center text-muted-foreground">ไม่พบรีวิว</div>
                     )}
                   </div>
 
-                  {/* ✅ Pagination รีวิว */}
                   {totalReviewPages > 1 && (
                     <div className="mt-4 flex items-center justify-center gap-2">
-                      <Button variant="outline" size="sm"
-                        disabled={reviewPage === 1}
-                        onClick={() => setReviewPage(p => p - 1)}>
-                        ก่อนหน้า
-                      </Button>
+                      <Button variant="outline" size="sm" disabled={reviewPage === 1}
+                        onClick={() => setReviewPage(p => p - 1)}>ก่อนหน้า</Button>
                       <div className="flex gap-1">
                         {Array.from({ length: totalReviewPages }, (_, i) => i + 1)
                           .filter(p => p === 1 || p === totalReviewPages || Math.abs(p - reviewPage) <= 1)
@@ -685,26 +666,17 @@ const AdminPage = () => {
                             p === "..." ? (
                               <span key={`e-${idx}`} className="px-2 py-1 text-sm text-muted-foreground">...</span>
                             ) : (
-                              <button key={p}
-                                onClick={() => setReviewPage(p as number)}
+                              <button key={p} onClick={() => setReviewPage(p as number)}
                                 className={`min-w-[32px] rounded-md px-2 py-1 text-sm transition-colors ${
-                                  reviewPage === p
-                                    ? "bg-primary text-white"
-                                    : "border border-border hover:bg-muted"
-                                }`}>
-                                {p}
-                              </button>
+                                  reviewPage === p ? "bg-primary text-white" : "border border-border hover:bg-muted"
+                                }`}>{p}</button>
                             )
                           )}
                       </div>
-                      <Button variant="outline" size="sm"
-                        disabled={reviewPage === totalReviewPages}
-                        onClick={() => setReviewPage(p => p + 1)}>
-                        ถัดไป
-                      </Button>
+                      <Button variant="outline" size="sm" disabled={reviewPage === totalReviewPages}
+                        onClick={() => setReviewPage(p => p + 1)}>ถัดไป</Button>
                     </div>
                   )}
-
                   {filteredReviews.length > 0 && (
                     <p className="mt-2 text-center text-xs text-muted-foreground">
                       แสดง {(reviewPage - 1) * REVIEWS_PER_PAGE + 1}–{Math.min(reviewPage * REVIEWS_PER_PAGE, filteredReviews.length)} จาก {filteredReviews.length} รายการ
@@ -762,9 +734,7 @@ const AdminPage = () => {
                     <button key={opt.value} type="button" onClick={() => setForm({ ...form, type: opt.value })}
                       className={`rounded-full px-5 py-2 text-sm font-medium transition-colors ${
                         form.type === opt.value ? "bg-primary text-white" : "bg-secondary hover:bg-muted"
-                      }`}>
-                      {opt.label}
-                    </button>
+                      }`}>{opt.label}</button>
                   ))}
                 </div>
               </div>
@@ -775,9 +745,7 @@ const AdminPage = () => {
                     <button key={g} type="button" onClick={() => toggleGenre(g)}
                       className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                         form.genres.includes(g) ? "bg-primary text-white" : "bg-secondary hover:bg-muted"
-                      }`}>
-                      {g}
-                    </button>
+                      }`}>{g}</button>
                   ))}
                 </div>
               </div>
@@ -803,7 +771,6 @@ const AdminPage = () => {
           </div>
         </div>
       )}
-
     </div>
   );
 };

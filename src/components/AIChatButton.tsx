@@ -9,10 +9,7 @@ import type { Book } from "@/data/books";
 type Message = {
   role: "user" | "bot";
   content: string;
-  recommendedBooks?: {
-    book: Book;
-    reason?: string;
-  }[];
+  recommendedBooks?: { book: Book; reason?: string }[];
 };
 
 type ChatRecommendation = {
@@ -20,240 +17,159 @@ type ChatRecommendation = {
   reason?: string;
 };
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+function normalize(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\u0E00-\u0E7Fa-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchScore(query: string, candidate: string): number {
+  const q = normalize(query);
+  const c = normalize(candidate);
+  if (!q || !c) return 0;
+  if (c === q) return 1;
+  if (c.includes(q) || q.includes(c)) return 0.9;
+  const bigrams = (s: string) => {
+    const b = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) b.add(s.slice(i, i + 2));
+    return b;
+  };
+  const bq = bigrams(q);
+  const bc = bigrams(c);
+  let overlap = 0;
+  bq.forEach((bg) => { if (bc.has(bg)) overlap++; });
+  return (2 * overlap) / (bq.size + bc.size || 1);
+}
+
+// ─── deep parse: รองรับทุกรูปแบบที่ backend อาจส่งมา ──────────────────────
+function deepParse(raw: any): { reply: string; recommendations: ChatRecommendation[] } {
+  // 1. ถ้าเป็น string → พยายาม parse ก่อน
+  if (typeof raw === "string") {
+    // ลบ markdown code fence ถ้ามี
+    const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    try {
+      return deepParse(JSON.parse(cleaned));
+    } catch {
+      // parse ไม่ได้ → return ตรงๆ เป็น reply
+      return { reply: cleaned, recommendations: [] };
+    }
+  }
+
+  // 2. ถ้าเป็น object
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    let reply = raw.reply ?? "";
+    let recommendations: ChatRecommendation[] = [];
+
+    // reply อาจเป็น string ปกติ หรือ JSON string ซ้อนอีกชั้น
+    if (typeof reply === "string") {
+      // ถ้า reply เหมือน JSON object ให้ parse แล้วเอา reply ข้างใน
+      const trimmed = reply.trim();
+      if (trimmed.startsWith("{")) {
+        try {
+          const inner = JSON.parse(trimmed);
+          reply = inner.reply ?? reply;
+          recommendations = Array.isArray(inner.recommendations) ? inner.recommendations : [];
+          return { reply, recommendations };
+        } catch { /* ไม่ใช่ JSON ก็ใช้ค่าเดิม */ }
+      }
+    }
+
+    // recommendations
+    if (Array.isArray(raw.recommendations)) {
+      recommendations = raw.recommendations;
+    } else if (typeof raw.recommendations === "string") {
+      try {
+        const parsed = JSON.parse(raw.recommendations);
+        recommendations = Array.isArray(parsed) ? parsed : [];
+      } catch { recommendations = []; }
+    }
+
+    return {
+      reply: String(reply || "ผมลองคัดหนังสือที่ใกล้เคียงให้แล้วครับ"),
+      recommendations,
+    };
+  }
+
+  return { reply: "ระบบยังไม่สามารถตอบได้", recommendations: [] };
+}
 
 export default function AIChatButton() {
   const { books } = useBooks();
-
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "bot",
-      content: "สวัสดีครับ! ผม BookBot 📚 ถามเรื่องหนังสือได้เลยครับ",
-    },
+    { role: "bot", content: "สวัสดีครับ! ผม BookBot 📚 ถามเรื่องหนังสือได้เลยครับ" },
   ]);
-
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const matchBooks = (
-    recs: ChatRecommendation[] = []
-  ) => {
+  const matchBooks = (recs: ChatRecommendation[] = []) => {
     return recs
       .map((rec) => {
-        const target =
-          rec.title?.trim().toLowerCase() || "";
-
-        const book = books.find((b) => {
-          const title =
-            b.title?.toLowerCase() || "";
-
-          const titleEn =
-            b.titleEn?.toLowerCase() || "";
-
-          return (
-            title.includes(target) ||
-            target.includes(title) ||
-            titleEn.includes(target)
+        const query = rec.title?.trim() ?? "";
+        if (!query) return null;
+        let best: Book | null = null;
+        let bestScore = 0;
+        for (const b of books) {
+          const s = Math.max(
+            matchScore(query, b.title ?? ""),
+            matchScore(query, b.titleEn ?? "")
           );
-        });
-
-        return book
-          ? {
-              book,
-              reason: rec.reason,
-            }
-          : null;
+          if (s > bestScore) { bestScore = s; best = b; }
+        }
+        return bestScore >= 0.4 ? { book: best!, reason: rec.reason } : null;
       })
-      .filter(Boolean) as {
-      book: Book;
-      reason?: string;
-    }[];
+      .filter(Boolean) as { book: Book; reason?: string }[];
   };
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
-
     const userMsg = input.trim();
-      const chatHistory = [
-      ...messages,
-      {
-        role: "user" as const,
-        content: userMsg,
-      },
-    ];
+    const chatHistory = [...messages, { role: "user" as const, content: userMsg }];
 
     setInput("");
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "user",
-        content: userMsg,
-      },
-    ]);
-
+    setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
     setLoading(true);
 
     try {
-
-      // เอาข้อความ user ล่าสุด ๆ มารวมกัน
-      // เช่น รอบก่อนถาม "แนวต่างโลก" รอบนี้ถาม "ขอแบบมังงะ"
-      // ระบบจะเข้าใจรวมเป็น "แนวต่างโลก ขอแบบมังงะ"
-      const contextText = chatHistory
-        .filter((m) => m.role === "user")
-        .slice(-3) // เอาแค่ 3 ข้อความล่าสุดของ user
-        .map((m) => m.content)
-        .join(" ")
-        .toLowerCase();
-
-      const normalized = contextText;
-      
-      const typeMap : Record<string, string> = {
-        "มังงะ": "manga",
-        "นิยาย": "novel",
-        "ไลท์โนเวล": "light-novel",
-      };
-
-      const tagList = Array.from(
-        new Set(
-          books.flatMap((b: any) =>
-            (b.tags ?? []).map((tag: string) => 
-              tag.toLowerCase().trim()
-            )
-          )
-        )
-      );
-
-      const wantedType = Object.entries(typeMap).find(([thai]) =>
-        normalized.includes(thai.toLowerCase())
-      )?.[1];
-
-      const wantedTags = tagList.filter((tag) =>
-        normalized.includes(tag)
-      );
-
-      const filteredBooks = books.filter((b: any) => {
-        const bookType = String(b.type || "").toLowerCase();
-
-        const bookTags = (b.tags ?? []).map((t: string) =>
-          t.toLowerCase().trim()
-        );
-
-        const matchType = !wantedType || bookType === wantedType;
-
-        const matchTags =
-          wantedTags.length === 0 ||
-          wantedTags.some((tag) => bookTags.includes(tag));
-
-        return matchType && matchTags;
+      const res = await fetch(`${API_URL}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMsg,
+          history: chatHistory.map((m) => ({ role: m.role, content: m.content })),
+          // ไม่ส่ง books จาก frontend — backend ดึงจาก cache เอง
+        }),
       });
 
-      // ถ้าผู้ใช้ไม่ได้ระบุประเภท เช่น ถามแค่ "สืบสวน"
-      // จะคละ มังงะ / นิยาย / ไลท์โนเวล ให้ Gemini เห็นครบกว่าเดิม
-      const selectedBooks = filteredBooks
-        .sort((a: any, b: any) => {
-          const aTags = (a.tags ?? []).length;
-          const bTags = (b.tags ?? []).length;
+      // อ่านเป็น text ก่อนเสมอ เพื่อ handle ทุกกรณี
+      const rawText = await res.text();
+      let rawData: any = rawText;
+      try { rawData = JSON.parse(rawText); } catch { /* ใช้ rawText แทน */ }
 
-          // หนังสือที่ tag เยอะกว่า จะถูกส่งไปให้ AI ก่อน
-          return bTags - aTags;
-      })
-      .slice(0, 12);
-
-      let booksContext = selectedBooks.map((b: any) => ({
-        title: b.title,
-        titleEn: b.titleEn,
-        type: b.type,
-        tags: b.tags ?? [],
-        authorName: b.authorName,
-        description: b.description ?? "",
-      }));
-          
-      // ถ้าไม่เจอเลย ให้ fallback เป็นประเภทที่ผู้ใช้ขอ
-      // เช่น ขอแบบมังงะ แต่ไม่มี tag ตรง ก็ยังส่งมังงะไปให้ AI
-      if (booksContext.length === 0 && wantedType) {
-        booksContext = books
-          .filter((b: any) => String(b.type || "").toLowerCase() === wantedType)
-          .slice(0, 10)
-          .map((b: any) => ({
-            title: b.title,
-            titleEn: b.titleEn,
-            type: b.type,
-            tags: b.tags ?? [],
-            authorName: b.authorName,
-            description: b.description ?? "",
-          }));
-      }
-      
-      // ถ้ายังไม่เจออีก ค่อยส่ง top books ไปให้ AI โดยไม่สนใจประเภทเลย
-      if (booksContext.length === 0) {
-        booksContext = books.slice(0, 10).map((b: any) => ({
-          title: b.title,
-          titleEn: b.titleEn,
-          type: b.type,
-          tags: b.tags ?? [],
-          authorName: b.authorName,
-          description: b.description ?? "",
-        }));
-      }
-
-      const res = await fetch(
-        `${API_URL}/chat`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            message: userMsg,
-            history: chatHistory.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-            books: booksContext,
-          }),
-        }
-      );
-
-      const data = await res.json();
+      const { reply, recommendations } = deepParse(rawData);
 
       setMessages((prev) => [
         ...prev,
         {
           role: "bot",
-
-          content:
-            data?.reply ||
-            "ขออภัยครับ ระบบยังไม่สามารถตอบได้",
-
-          recommendedBooks: matchBooks(
-            data?.recommendations ?? []
-          ),
+          content: reply,
+          recommendedBooks: matchBooks(recommendations),
         },
       ]);
     } catch (err) {
-      console.error(err);
-
+      console.error("[BookBot error]", err);
       setMessages((prev) => [
         ...prev,
-        {
-          role: "bot",
-          content:
-            "ขออภัยครับ เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะครับ",
-        },
+        { role: "bot", content: "ขออภัยครับ เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะครับ" },
       ]);
     } finally {
       setLoading(false);
@@ -263,47 +179,23 @@ export default function AIChatButton() {
   return (
     <>
       <button
-        onClick={() =>
-          setOpen((prev) => !prev)
-        }
+        onClick={() => setOpen((prev) => !prev)}
         className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition-all hover:bg-blue-700"
       >
-        {open ? (
-          <X size={24} />
-        ) : (
-          <MessageCircle size={24} />
-        )}
+        {open ? <X size={24} /> : <MessageCircle size={24} />}
       </button>
 
       {open && (
         <div className="fixed bottom-24 right-6 z-50 flex h-[520px] w-80 flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 sm:w-96">
-          {/* HEADER */}
           <div className="flex items-center gap-2 rounded-t-2xl bg-blue-600 px-4 py-3">
-            <MessageCircle
-              size={20}
-              className="text-white"
-            />
-
-            <span className="font-semibold text-white">
-              BookBot
-            </span>
-
-            <span className="ml-auto text-xs text-blue-200">
-              ผู้ช่วยค้นหาและแนะนำหนังสือ
-            </span>
+            <MessageCircle size={20} className="text-white" />
+            <span className="font-semibold text-white">BookBot</span>
+            <span className="ml-auto text-xs text-blue-200">ผู้ช่วยค้นหาและแนะนำหนังสือ</span>
           </div>
 
-          {/* MESSAGES */}
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
             {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex ${
-                  msg.role === "user"
-                    ? "justify-end"
-                    : "justify-start"
-                }`}
-              >
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div
                   className={`max-w-[94%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                     msg.role === "user"
@@ -311,30 +203,19 @@ export default function AIChatButton() {
                       : "rounded-bl-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap">
-                    {msg.content}
-                  </div>
+                  <div className="whitespace-pre-wrap">{msg.content}</div>
 
                   {!!msg.recommendedBooks?.length && (
                     <div className="mt-3">
-                      <p className="mt-2 text-xs font-medium text-muted-foreground">
-                        หนังสือแนะนำ
-                      </p>
-
+                      <p className="mt-2 text-xs font-medium text-muted-foreground">หนังสือแนะนำ</p>
                       <div className="flex gap-3 overflow-x-auto py-2">
                         {msg.recommendedBooks.map(({ book, reason }) => (
-                          <div
-                            key={String(book.id ?? book.bookID)}
-                            className="w-36 flex-shrink-0"
-                          >
+                          <div key={String(book.id ?? book.bookID)} className="w-36 flex-shrink-0">
                             <div className="overflow-hidden rounded-xl bg-background">
                               <BookCard book={book} />
                             </div>
-
                             {reason && (
-                              <p className="mt-1 line-clamp-2 px-1 text-[11px] text-muted-foreground">
-                                {reason}
-                              </p>
+                              <p className="mt-1 line-clamp-2 px-1 text-[11px] text-muted-foreground">{reason}</p>
                             )}
                           </div>
                         ))}
@@ -343,34 +224,24 @@ export default function AIChatButton() {
                   )}
                 </div>
               </div>
-            ))}  
+            ))}
 
             {loading && (
               <div className="flex justify-start">
                 <div className="rounded-2xl rounded-bl-sm bg-gray-100 px-4 py-2 dark:bg-gray-800">
-                  <Loader2
-                    size={16}
-                    className="animate-spin text-gray-500"
-                  />
+                  <Loader2 size={16} className="animate-spin text-gray-500" />
                 </div>
               </div>
             )}
-
             <div ref={bottomRef} />
           </div>
 
-          {/* INPUT */}
           <div className="flex gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
             <input
               value={input}
-              onChange={(e) =>
-                setInput(e.target.value)
-              }
+              onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  !e.shiftKey
-                ) {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   sendMessage();
                 }
@@ -378,12 +249,9 @@ export default function AIChatButton() {
               placeholder="พิมพ์คำถามเกี่ยวกับหนังสือ..."
               className="flex-1 rounded-xl border border-gray-300 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
             />
-
             <button
               onClick={sendMessage}
-              disabled={
-                !input.trim() || loading
-              }
+              disabled={!input.trim() || loading}
               aria-label="ส่งข้อความ"
               title="ส่งข้อความ"
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:opacity-40"
