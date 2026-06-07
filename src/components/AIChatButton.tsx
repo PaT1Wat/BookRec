@@ -69,7 +69,11 @@ function matchScore(query: string, candidate: string): number {
   // ✅ เพิ่ม: edit distance score
   // คำนวณเฉพาะกรณีความยาวใกล้เคียงกัน (ไม่เกิน 2 เท่า) เพื่อประหยัด CPU
   let editScore = 0;
-  if (q.length > 0 && c.length > 0 && Math.max(q.length, c.length) <= Math.min(q.length, c.length) * 2) {
+  if (
+    q.length > 0 && 
+    c.length > 0 && 
+    Math.max(q.length, c.length) <= Math.min(q.length, c.length) * 2
+  ) {
     const dist = levenshtein(q, c);
     const maxLen = Math.max(q.length, c.length);
     editScore = Math.max(0, 1 - dist / maxLen);
