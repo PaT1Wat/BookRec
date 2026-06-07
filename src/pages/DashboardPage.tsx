@@ -72,6 +72,9 @@ const DashboardPage = () => {
   const [interactionStats, setInteractionStats] = useState<InteractionStat[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [totalImpressions, setTotalImpressions] = useState(0);
+  const [totalClicks, setTotalClicks] = useState(0);
+  const [topCTRBooks, setTopCTRBooks] = useState<{bookID: number; title: string; coverUrl: string; impressions: number; clicks: number; ctr: number}[]>([]);
 
   const visibleBooks = useMemo(() => books.filter((b) => !b.isHidden), [books]);
   // allBooksRaw includes hidden books — used for hidden count stat
@@ -96,6 +99,7 @@ const DashboardPage = () => {
         { data: userCountData },
         { data: reviewData },
         { data: statsData },
+        { data: impressionData },
       ] = await Promise.all([
         db.rpc("get_user_count"),
         db.from("review")
@@ -103,6 +107,7 @@ const DashboardPage = () => {
           .order("createdAt", { ascending: false })
           .limit(5),
         db.from("book_interaction_stats").select("*"),
+        db.from("rec_impression").select("bookID, clicked"),
       ]);
 
       setTotalUsers(userCountData ?? 0);
@@ -113,6 +118,39 @@ const DashboardPage = () => {
       setTotalFavorites(stats.reduce((s: number, r: any) => s + Number(r.favoriteCount ?? 0), 0));
       setTotalViews(stats.reduce((s: number, r: any) => s + Number(r.viewCount ?? 0), 0));
       setTotalReviews(stats.reduce((s: number, r: any) => s + Number(r.reviewCount ?? 0), 0));
+
+      const impressions = impressionData ?? [];
+      setTotalImpressions(impressions.length);
+      setTotalClicks(impressions.filter((r: any) => r.clicked).length);
+
+      const bookImpressionMap = new Map<number, { impressions: number; clicks: number }>();
+      impressions.forEach((r: any) => {
+        const cur = bookImpressionMap.get(r.bookID) ?? { impressions: 0, clicks: 0 };
+        bookImpressionMap.set(r.bookID, {
+          impressions: cur.impressions + 1,
+          clicks: cur.clicks + (r.clicked ? 1 : 0),
+        });
+      });
+
+      const topCTR = [...bookImpressionMap.entries()]
+        .filter(([, v]) => v.impressions >= 5)
+        .map(([bookID, v]) => ({
+          bookID,
+          impressions: v.impressions,
+          clicks: v.clicks,
+          ctr: Math.round((v.clicks / v.impressions) * 100),
+        }))
+        .sort((a, b) => b.ctr - a.ctr)
+        .slice(0, 5);
+
+      // หมายเหตุ: bookByNumId ยังไม่พร้อมตอน loadStats ทำงาน
+      // เลยเก็บแค่ bookID ไว้ก่อน แล้วแปลงใน useMemo แทน
+      setTopCTRBooks(topCTR.map((item) => ({
+        ...item,
+        title: "",
+        coverUrl: "",
+      })));
+
     } catch (err) {
       console.error("Dashboard stats error:", err);
     } finally {
@@ -196,6 +234,18 @@ const DashboardPage = () => {
       .slice(0, 5);
   }, [visibleBooks, interactionStats]);
 
+  // ── Top CTR books (resolve title จาก bookByNumId) ─────────────────────────
+  const topCTRBooksResolved = useMemo(() => {
+    return topCTRBooks.map((item) => {
+      const book = bookByNumId.get(item.bookID);
+      return {
+        ...item,
+        title: book?.title ?? "—",
+        coverUrl: book?.coverUrl ?? "",
+      };
+    });
+  }, [topCTRBooks, bookByNumId]);
+
   const isLoading = booksLoading || statsLoading;
 
   return (
@@ -249,6 +299,16 @@ const DashboardPage = () => {
             icon={MessageSquare} color="#1D9E75" bg="#E1F5EE" loading={statsLoading} />
           <StatCard label="ยอดวิวรวม" value={totalViews.toLocaleString()}
             icon={Eye} color="#7F77DD" bg="#EEEDFE" loading={statsLoading} />
+
+          <StatCard
+            label="CTR (คลิกต่อการแสดงผล)"
+            value={totalImpressions > 0 ? `${Math.round((totalClicks / totalImpressions) * 100)}%` : "—"}
+            sub={`${totalClicks} คลิก จาก ${totalImpressions} ครั้ง`}
+            icon={TrendingUp}
+            color="#639922"
+            bg="#EEF5E1"
+            loading={statsLoading}
+          />
         </div>
       </div>
 
@@ -420,7 +480,7 @@ const DashboardPage = () => {
           </div>
         </div>
 
-        {/* Recent reviews — ใช้ bookByNumId map แทน find() */}
+        {/* Recent reviews */}
         <div className="rounded-xl border bg-card p-6 shadow-card">
           <h2 className="text-base font-semibold mb-5 flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-primary" />
@@ -439,7 +499,6 @@ const DashboardPage = () => {
                 ))
               : recentReviews.length > 0
               ? recentReviews.map((r) => {
-                  // ✅ match by number key — reliable even if bookID is 0
                   const book = bookByNumId.get(Number(r.bookID));
                   return (
                     <div key={r.reviewID} className="flex gap-3 rounded-lg hover:bg-muted/40 px-2 py-2 transition-colors">
@@ -481,7 +540,59 @@ const DashboardPage = () => {
               )}
           </div>
         </div>
+
+      </div> {/* ← ปิด Row 4 grid */}
+
+      {/* Row 5: CTR Table */}
+      <div className="rounded-xl border bg-card p-6 shadow-card">
+        <h2 className="text-base font-semibold mb-5 flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-primary" />
+          หนังสือที่ถูกคลิกจากระบบแนะนำมากที่สุด
+          <span className="text-xs font-normal text-muted-foreground ml-1">(CTR)</span>
+        </h2>
+        {statsLoading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="h-10 w-7 rounded bg-muted animate-pulse" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3.5 w-3/4 rounded bg-muted animate-pulse" />
+                  <div className="h-2 w-full rounded-full bg-muted animate-pulse" />
+                </div>
+                <div className="w-10 h-4 rounded bg-muted animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : topCTRBooksResolved.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">ยังไม่มีข้อมูล CTR</p>
+        ) : (
+          <div className="space-y-3">
+            {topCTRBooksResolved.map((item, i) => (
+              <div key={item.bookID} className="flex items-center gap-3">
+                <span className="text-xs font-bold text-muted-foreground w-4">{i + 1}</span>
+                <img src={item.coverUrl || "/placeholder.svg"} alt={item.title}
+                  className="h-10 w-7 rounded object-cover shrink-0 shadow-sm" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{item.title}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex-1 h-1.5 rounded-full bg-secondary overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${item.ctr}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {item.clicks}/{item.impressions}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-sm font-bold text-primary shrink-0">{item.ctr}%</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
     </div>
   );
 };

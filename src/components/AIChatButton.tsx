@@ -27,12 +27,34 @@ function normalize(s: string): string {
     .trim();
 }
 
+// ── helpers ───────────────────────────────────────────────────────────────
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
 function matchScore(query: string, candidate: string): number {
   const q = normalize(query);
   const c = normalize(candidate);
   if (!q || !c) return 0;
+
+  // ตรงทั้งหมด
   if (c === q) return 1;
+
+  // ตรงบางส่วน
   if (c.includes(q) || q.includes(c)) return 0.9;
+
+  // bigram similarity (เดิม)
   const bigrams = (s: string) => {
     const b = new Set<string>();
     for (let i = 0; i < s.length - 1; i++) b.add(s.slice(i, i + 2));
@@ -42,7 +64,19 @@ function matchScore(query: string, candidate: string): number {
   const bc = bigrams(c);
   let overlap = 0;
   bq.forEach((bg) => { if (bc.has(bg)) overlap++; });
-  return (2 * overlap) / (bq.size + bc.size || 1);
+  const bigramScore = (2 * overlap) / (bq.size + bc.size || 1);
+
+  // ✅ เพิ่ม: edit distance score
+  // คำนวณเฉพาะกรณีความยาวใกล้เคียงกัน (ไม่เกิน 2 เท่า) เพื่อประหยัด CPU
+  let editScore = 0;
+  if (q.length > 0 && c.length > 0 && Math.max(q.length, c.length) <= Math.min(q.length, c.length) * 2) {
+    const dist = levenshtein(q, c);
+    const maxLen = Math.max(q.length, c.length);
+    editScore = Math.max(0, 1 - dist / maxLen);
+  }
+
+  // เอาค่าสูงสุดระหว่าง bigram กับ edit distance
+  return Math.max(bigramScore, editScore);
 }
 
 // ─── deep parse: รองรับทุกรูปแบบที่ backend อาจส่งมา ──────────────────────
@@ -125,7 +159,8 @@ export default function AIChatButton() {
           );
           if (s > bestScore) { bestScore = s; best = b; }
         }
-        return bestScore >= 0.4 ? { book: best!, reason: rec.reason } : null;
+        // ใน matchBooks ฟังก์ชัน
+        return bestScore >= 0.3 ? { book: best!, reason: rec.reason } : null; // ✅ เปลี่ยนจาก 0.4
       })
       .filter(Boolean) as { book: Book; reason?: string }[];
   };

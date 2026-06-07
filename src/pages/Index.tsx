@@ -87,7 +87,8 @@ const computedRating = (b: any): number => {
   const fav = Number(b.favoriteCount ?? 0);
   const rev = Number(b.reviewActionCount ?? 0);
   if (fav + rev === 0) return 0;
-  return Math.min(5, (fav * 5.0 + rev * 4.5) / (fav + rev));
+  const positiveRev = Math.max(0, rev - negativeReviews);
+  return Math.min(5, (fav * 5.0 + positiveRev * 4.5) / (fav + rev));
 };
 
 // ─── Index ─────────────────────────────────────────────────────────────────────
