@@ -182,7 +182,7 @@ export default function AIChatButton() {
       const res = await fetch(`${API_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           message: userMsg,
           history: chatHistory.map((m) => ({ role: m.role, content: m.content })),
