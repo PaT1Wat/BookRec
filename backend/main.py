@@ -128,11 +128,11 @@ async def chat(body: dict):
                 "t": b.get("title", ""),
                 "e": b.get("titleEn", ""),
                 "k": b.get("type", ""),
-                "g": b.get("tags", []),
+                "g": b.get("tags", [])[:4], 
                 "a": b.get("author", ""),
             }
             for b in books_context
-        ]
+        ][:300]
         books_json = json.dumps(compact_books, ensure_ascii=False, separators=(",", ":"))
 
         prompt = f"""คุณคือ BookBot ผู้ช่วยแนะนำหนังสือภาษาไทย
@@ -154,7 +154,7 @@ async def chat(body: dict):
 
         response = None
         last_error = None
-        models = ["gemini-2.5-flash", "gemini-2.5-flash-lite-preview-06-17", "gemini-2.0-flash"]
+        models = ["gemini-2.0-flash", "gemini-2.5-flash-lite-preview-06-17", "gemini-2.5-flash"]
 
         for model in models:
             try:
@@ -163,7 +163,7 @@ async def chat(body: dict):
                     contents=prompt,
                     config={
                         "temperature": 0.3,
-                        "maxOutputTokens": 4096,
+                        "maxOutputTokens": 1024,
                         "response_mime_type": "application/json",
                     },
                 )
