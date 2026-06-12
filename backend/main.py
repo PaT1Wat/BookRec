@@ -107,6 +107,8 @@ async def startup():
 # ─── CHAT ───────────────────────────────────────────────────────────────────
 @app.post("/chat")
 async def chat(body: dict):
+    user_msg = ""        # ← เพิ่มตรงนี้
+    books_context = []   # ← เพิ่มตรงนี้
     try:
         if not gemini_client:
             return {"reply": "ยังไม่ได้ตั้งค่า Gemini API key", "recommendations": []}
@@ -154,7 +156,7 @@ async def chat(body: dict):
 
         response = None
         last_error = None
-        models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.1-flash-lite"]
+        models = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-flash"]
 
         for model in models:
             try:
@@ -254,6 +256,18 @@ async def chat(body: dict):
 
     except Exception as e:
         traceback.print_exc()
+        try:
+            keyword = user_msg.lower()
+            matched = [b for b in books_context 
+                       if keyword in b["t"].lower() or 
+                       any(keyword in tag.lower() for tag in b.get("g", []))][:5]
+            if matched:
+                return {
+                    "reply": "ขออภัย ระบบ AI ไม่พร้อมใช้งานชั่วคราว แต่ค้นหาเบื้องต้นให้แล้วครับ",
+                    "recommendations": [{"title": b["t"], "reason": "ตรงกับคำค้นหา"} for b in matched]
+                }
+        except Exception:
+            pass
         return {"reply": f"เกิดข้อผิดพลาด: {str(e)}", "recommendations": []}
 
 
