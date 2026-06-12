@@ -154,7 +154,7 @@ async def chat(body: dict):
 
         response = None
         last_error = None
-        models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash"]
+        models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.1-flash-lite"]
 
         for model in models:
             try:
