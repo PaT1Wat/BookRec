@@ -172,7 +172,7 @@ async def chat(body: dict):
             except Exception as e:
                 last_error = e
                 print(f"[gemini] failed {model}: {repr(e)}")
-                time.sleep(0.5)
+                time.sleep(2)
 
         if response is None:
             raise last_error
