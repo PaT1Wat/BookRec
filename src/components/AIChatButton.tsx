@@ -176,13 +176,19 @@ export default function AIChatButton() {
 
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+
+    setMessages((prev) => [...prev, { 
+      role: "bot", 
+      content: "⏳ กำลังเชื่อมต่อ อาจใช้เวลาสักครู่..." 
+    }]);
+
     setLoading(true);
 
     try {
       const res = await fetch(`${API_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(30000),
         body: JSON.stringify({
           message: userMsg,
           history: chatHistory.map((m) => ({ role: m.role, content: m.content })),
