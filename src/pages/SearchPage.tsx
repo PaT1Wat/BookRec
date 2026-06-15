@@ -100,6 +100,11 @@ const SearchPage = () => {
           favoriteCount: Number(stat?.favoriteCount ?? 0),
           reviewActionCount: Number(stat?.reviewActionCount ?? 0),
           viewCount: Number(stat?.viewCount ?? 0),
+          // ✅ เพิ่มฟิลด์ที่ขาด ให้ตรงกับ BooksContext
+          interactionCount: Number(stat?.interactionCount ?? 0),
+          interactionScore: Number(stat?.interactionScore ?? 0),
+          clickScore: Number(stat?.clickScore ?? 0),
+          negativeReviewCount: Number(stat?.negativeReviewCount ?? 0),
         };
       });
 

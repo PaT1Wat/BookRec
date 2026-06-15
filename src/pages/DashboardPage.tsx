@@ -301,9 +301,9 @@ const DashboardPage = () => {
             icon={Eye} color="#7F77DD" bg="#EEEDFE" loading={statsLoading} />
 
           <StatCard
-            label="CTR (คลิกต่อการแสดงผล)"
+            label="CTR รวมทั้งระบบ (ทุกผู้ใช้)"
             value={totalImpressions > 0 ? `${Math.round((totalClicks / totalImpressions) * 100)}%` : "—"}
-            sub={`${totalClicks} คลิก จาก ${totalImpressions} ครั้ง`}
+            sub={`${totalClicks} คลิก จาก ${totalImpressions} ครั้ง (หนังสือที่แนะนำ)`}
             icon={TrendingUp}
             color="#639922"
             bg="#EEF5E1"

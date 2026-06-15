@@ -284,7 +284,7 @@ export function BooksProvider({ children }: { children: ReactNode }) {
 
           return {
             ...book,
-            rating: Number(book.rating ?? 0),
+            rating: Number(stat?.rating ?? book.rating ?? 0),
             reviewCount: Number(stat?.reviewCount ?? book.reviewCount ?? 0),
             favoriteCount: Number(stat?.favoriteCount ?? 0),
             reviewActionCount: Number(stat?.reviewActionCount ?? 0),
