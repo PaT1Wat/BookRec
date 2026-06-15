@@ -292,9 +292,9 @@ const DashboardPage = () => {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <StatCard label="ผู้ใช้ทั้งหมด" value={totalUsers}
             icon={Users} color="#378ADD" bg="#E6F1FB" loading={statsLoading} />
-          <StatCard label="คะแนนเฉลี่ย" value={avgRating}
-            sub="เฉพาะเล่มที่มีรีวิว"
-            icon={Star} color="#BA7517" bg="#FAEEDA" loading={isLoading} />
+          {/* <StatCard label="คะแนนเฉลี่ย" value={avgRating}
+            sub="เฉพาะเล่มที่มีรีวิว" 
+            icon={Star} color="#BA7517" bg="#FAEEDA" loading={isLoading} /> */}
           <StatCard label="รีวิวทั้งหมด" value={totalReviews}
             icon={MessageSquare} color="#1D9E75" bg="#E1F5EE" loading={statsLoading} />
           <StatCard label="ยอดวิวรวม" value={totalViews.toLocaleString()}
