@@ -93,14 +93,10 @@ const BookDetailPage = () => {
 
   useEffect(() => {
     if (id && user) {
-      const key = `viewed:${user.id}:${id}`;
-      if (!sessionStorage.getItem(key)) {
-        sessionStorage.setItem(key, "1");
-        logInteraction("view", Number(id)).then(async () => {
-          await new Promise((r) => setTimeout(r, 800));
-          refetchBooks();
-        });
-      }
+      logInteraction("view", Number(id)).then(async () => {
+        await new Promise((r) => setTimeout(r, 800));
+        refetchBooks();
+      });
     }
   }, [id, user]);
 
