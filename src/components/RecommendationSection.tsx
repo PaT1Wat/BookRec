@@ -29,10 +29,14 @@ export default function RecommendationSection() {
   const getTags = (book: any): string[] =>
     ((book.tags ?? book.genres ?? []) as string[]).map((t) => t.toLowerCase());
 
-  // ✅ Cache key รวม interaction state ด้วย (0 = ไม่มี, 1 = มี)
+  // ✅ ใหม่ — key ผูกกับ "วันที่" (YYYY-MM-DD) แทน hasInteraction
+  const getTodayKey = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  };
+
   const getCacheKey = useCallback(
-    (userId?: string, hasInteraction = false) =>
-      `recs:${userId ?? "guest"}:${hasInteraction ? "1" : "0"}`,
+    (userId?: string) => `recs:${userId ?? "guest"}:${getTodayKey()}`,
     []
   );
 
@@ -71,12 +75,12 @@ export default function RecommendationSection() {
       const hasInteraction = interactionBookIds.length > 0;
 
       // ✅ เช็ค cache ด้วย key ที่รวม interaction state
-      const cacheKey = getCacheKey(user.id, hasInteraction);
+      const cacheKey = getCacheKey(user.id);
       try {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
-          const { ids, ts } = JSON.parse(cached);
-          if (Date.now() - ts < 60 * 60 * 1000 && ids?.length > 0) {
+          const { ids } = JSON.parse(cached);
+          if (ids?.length > 0) {
             const cachedBooks = ids
               .map((id: string) => bookMap.get(id))
               .filter(Boolean) as Book[];
@@ -87,7 +91,7 @@ export default function RecommendationSection() {
             }
           }
         }
-      } catch {}
+      } catch {}  
 
       const interactionTags = interactionBookIds.flatMap((id) => {
         const book = bookMap.get(id);
@@ -174,12 +178,12 @@ export default function RecommendationSection() {
   }, [fetchRecs]);
 
   // ─── ✅ ฟัง recs:invalidate → ล้าง cache + re-fetch ─────────────────────
+  // ✅ เดิม
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (user?.id && detail?.userId !== user.id) return;
 
-      // ล้าง cache ทั้งหมดของ user นี้
       try {
         Object.keys(localStorage)
           .filter((k) => k.startsWith(`recs:${user?.id ?? "guest"}:`))
