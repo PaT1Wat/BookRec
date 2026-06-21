@@ -205,14 +205,40 @@ const BookDetailPage = () => {
   const reviewActionCount = Number((book as any).reviewActionCount ?? 0);
   const viewCount         = Number((book as any).viewCount         ?? 0);
 
-  // ✅ คะแนนเฉลี่ยจาก review เท่านั้น — ถ้ายังไม่มี review ใช้ค่าจาก DB
-  const avgRating = Number(book.rating ?? 0);
+  // ✅ กฎการนับรีวิว (ตรงกับ recommend.py):
+  // - ให้ดาวอย่างเดียว (ไม่มีคอมเมนต์) → นับดาวตรงๆ ไม่ผ่านสูตร
+  // - ให้ดาว + เขียนคอมเมนต์ → ผ่านสูตร weight = 1.5×rating - 2.5
+  //   (เช่น 1 ดาว + คอมเมนต์ = weight -1.0 → ถือเป็นรีวิวเชิงลบ ไม่นับเข้าค่าเฉลี่ย)
+  // ใช้กฎเดียวกันทั้งดาวที่แสดงผล (avgRating) และคะแนนแนะนำ (interactionScore)
+  const hasComment = (r: Review) => !!r.comment && r.comment.trim().length > 0;
 
-  // interaction score ตาม recommend.py
+  // ✅ คะแนนเฉลี่ยดาวที่แสดงผล — ใช้กฎเดียวกับ interactionScore ทุกประการ:
+  // - ให้ดาวอย่างเดียว → นับ "ดาวดิบ" ตรงๆ
+  // - ให้ดาว + คอมเมนต์ → นับ "weight หลังผ่านสูตร 1.5×rating-2.5" ไม่ใช่ดาวดิบ
+  //   (เช่น 4 ดาว + คอมเมนต์ → ใช้ 3.5 ไม่ใช่ 4.0 ในการเฉลี่ย)
+  // รีวิวที่ weight ≤ 0 (เช่น 1 ดาว + คอมเมนต์ = -1.0) ถูกตัดออกไม่นับเข้าค่าเฉลี่ยเลย
+  // ถ้ายังไม่มี review ที่ fetch มา (เช่นกำลังโหลด) ใช้ค่าจาก DB เป็น fallback ชั่วคราว
+  const ratedValues = reviews
+    .map((r) => {
+      if (!hasComment(r)) return r.rating; // ให้ดาวอย่างเดียว → ใช้ดาวดิบ
+      const weight = 1.5 * r.rating - 2.5; // มีคอมเมนต์ → ใช้ weight หลังสูตร
+      return weight > 0 ? weight : null; // weight <= 0 → ตัดทิ้ง (return null)
+    })
+    .filter((v): v is number => v !== null);
+  const avgRating = reviews.length
+    ? (ratedValues.length
+        ? Number((ratedValues.reduce((sum, v) => sum + v, 0) / ratedValues.length).toFixed(1))
+        : 0)
+    : Number(book.rating ?? 0);
+
+  // ✅ interaction score ตาม recommend.py (action_weight: weight = 1.5*rating - 2.5)
+  // แยกตามกฎเดียวกับ avgRating ข้างบน: ให้ดาวอย่างเดียว → นับดาวตรงๆ,
+  // ให้ดาว + คอมเมนต์ → ผ่านสูตรแล้วตัด weight<=0 ทิ้ง
   const reviewScore = reviews.length
     ? reviews.reduce((sum, r) => {
+        if (!hasComment(r)) return sum + r.rating; // ให้ดาวอย่างเดียว → บวกตรงๆ
         const weight = Number((1.5 * r.rating - 2.5).toFixed(2));
-        return sum + (weight > 0 ? weight : 0); // ตัด 1 ดาวออก
+        return sum + (weight > 0 ? weight : 0); // มีคอมเมนต์ → ผ่านสูตร ตัด <=0 ทิ้ง
       }, 0)
     : reviewActionCount * 4.5; // fallback ถ้าไม่มี review data
 
