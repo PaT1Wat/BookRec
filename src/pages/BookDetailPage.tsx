@@ -211,7 +211,7 @@ const BookDetailPage = () => {
   // interaction score ตาม recommend.py
   const reviewScore = reviews.length
     ? reviews.reduce((sum, r) => {
-        const weight = Number(((r.rating / 5.0) * 6.0 - 1.0).toFixed(2));
+        const weight = Number((1.5 * r.rating - 2.5).toFixed(2));
         return sum + (weight > 0 ? weight : 0); // ตัด 1 ดาวออก
       }, 0)
     : reviewActionCount * 4.5; // fallback ถ้าไม่มี review data
