@@ -141,17 +141,27 @@ const Index = () => {
   const fetchedKeyRef = useRef<string | null>(null);
   const fetchSeqRef = useRef(0);
 
-  // ─── sortByScore รู้จัก genreWeights ─────────────────────────────────────
+  // ─── sortByScore: ใช้กับ section "🔥 ยอดนิยม" (popularBooks) เท่านั้น ──────
+  // ลำดับการเรียง 3 ชั้น: (1) rating ก่อนเสมอ (2) ถ้า rating เท่ากัน ใช้
+  // interactionScore (3) ถ้ายังเท่ากันอีก ค่อยใช้ genreBoost+clickScore จาก
+  // Click Tracking (หัวข้อ 2.2.7) เป็น tie-breaker ชั้นสุดท้าย
+  // หมายเหตุ: section "💡 สำหรับคุณ" ไม่ใช้ comparator นี้ — ใช้
+  // sortByInteractionThenRating (interactionScore ก่อน, rating รอง) แทน
   const sortByScore = useCallback((a: any, b: any) => {
-    const getScore = (book: any) => {
-      const base = computedRating(book);
+    const ratingA = computedRating(a);
+    const ratingB = computedRating(b);
+    if (Math.abs(ratingB - ratingA) > 0.001) return ratingB - ratingA;
+
+    const scoreA = interactionScoreOf(a);
+    const scoreB = interactionScoreOf(b);
+    if (Math.abs(scoreB - scoreA) > 0.001) return scoreB - scoreA;
+
+    const clickAdjustment = (book: any) => {
       const tags: string[] = book.tags ?? book.genres ?? [];
       const genreBoost = tags.reduce((sum, tag) => sum + (genreWeights[tag] ?? 0), 0) * 0.1;
-      return base + genreBoost + (book.clickScore ?? 0) * 0.5;
+      return genreBoost + (book.clickScore ?? 0) * 0.5;
     };
-    const diff = getScore(b) - getScore(a);
-    if (Math.abs(diff) > 0.001) return diff;
-    return totalInteractions(b) - totalInteractions(a);
+    return clickAdjustment(b) - clickAdjustment(a);
   }, [genreWeights]);
 
   // ─── fetch interactions (ใช้กัน "หนังสือที่เคย interact" ไม่ให้แนะนำซ้ำ) ──────
