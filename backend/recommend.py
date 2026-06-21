@@ -72,7 +72,7 @@ def action_weight(action, rating=None):
         if rating is None: 
             return 2.5  # ไม่มีดาว → กลางๆ
         # สูตร: แปลง rating 1-5 → weight -1.0 ถึง 5.0
-        return round((rating / 5.0) * 6.0 - 1.0, 2)
+        return round(1.5 * rating - 2.5, 2)
     return 0.0
 
 
@@ -260,51 +260,100 @@ def load_model():
     with open(MODEL_FILE, "rb") as file:
         return pickle.load(file)
 
+# ─── interactionScore / rating helpers ──────────────────────────────────────
+# ✅ ตรงกับสูตรฝั่ง frontend (book_interaction_stats):
+#    interactionScore = favoriteCount*5.0 + reviewActionCount*4.5 + viewCount*0.1
+# ใช้เป็นเกณฑ์เรียงหลักทุกเคส (A/B/C/D + genre filter ที่ผู้ใช้เลือกเอง)
+# ถ้า interactionScore เท่ากันเป๊ะ ถึงใช้ rating (เฉลี่ยดาว) เป็น tie-breaker
+def build_interaction_scores(data):
+    """
+    คำนวณ interactionScore และ rating ของหนังสือทุกเล่ม จาก interaction ทั้งระบบ
+    คืนค่าเป็น dict: bookID(str) → {"score": float, "rating": float}
+    """
+    fav_count = defaultdict(int)
+    review_count = defaultdict(int)
+    view_count = defaultdict(int)
+    rating_sum = defaultdict(float)
+    rating_n = defaultdict(int)
+
+    for row in data["interaction"]:
+        book_id = get_book_id(row)
+        if not book_id:
+            continue
+        book_id = str(book_id)
+        action = row.get("actionType")
+        if action == "favorite":
+            fav_count[book_id] += 1
+        elif action == "review":
+            review_count[book_id] += 1
+            rating = row.get("rating")
+            if rating is not None:
+                rating_sum[book_id] += float(rating)
+                rating_n[book_id] += 1
+        elif action == "view":
+            view_count[book_id] += 1
+
+    book_ids = {str(b.get("bookID")) for b in data["books"] if b.get("bookID")}
+    book_ids |= set(fav_count) | set(review_count) | set(view_count)
+
+    scores = {}
+    for book_id in book_ids:
+        score = (
+            fav_count.get(book_id, 0) * 5.0
+            + review_count.get(book_id, 0) * 4.5
+            + view_count.get(book_id, 0) * 0.1
+        )
+        n = rating_n.get(book_id, 0)
+        rating = (rating_sum[book_id] / n) if n > 0 else 0.0
+        scores[book_id] = {"score": score, "rating": rating}
+
+    return scores
 
 def fallback_from_interaction(user_id, n=12, genres=None):
     """
     ระบบแนะนำสำรอง (Fallback) ใช้เมื่อ LightFM ใช้งานไม่ได้
     เช่น ผู้ใช้ใหม่ที่ไม่อยู่ใน model หรือข้อมูลไม่พอ train
 
-    วิธีคำนวณ:
-    1. รวม weight ของ interaction ทุกคนในระบบต่อหนังสือแต่ละเล่ม
-       → หนังสือที่คนชอบรวมกันมากจะได้คะแนนสูง (ยอดนิยม)
-    2. กรองหนังสือที่ผู้ใช้เคยดูแล้วออก
-    3. กรอง genre ถ้ามีการระบุ
-    4. ถ้าได้ไม่ครบ n เล่ม → เติมด้วยหนังสือที่มี rating/review สูงสุด
+    วิธีคำนวณ (ตรงกับกฎฝั่ง frontend ทุกเคส — A/B/C/D + genre filter):
+    1. คำนวณ interactionScore ของหนังสือแต่ละเล่ม (favoriteCount*5.0 +
+       reviewActionCount*4.5 + viewCount*0.1) → หนังสือที่คนสนใจรวมกันมาก
+       จะได้คะแนนสูง (ยอดนิยม)
+    2. เรียงตาม interactionScore มากไปน้อยก่อนเสมอ ถ้า score เท่ากันเป๊ะ
+       ถึงใช้ rating (เฉลี่ยดาว) เป็น tie-breaker
+    3. กรองหนังสือที่ผู้ใช้เคยดูแล้วออก
+    4. กรอง genre ถ้ามีการระบุ
+    5. ถ้าได้ไม่ครบ n เล่ม → เติมด้วยหนังสือที่เหลือ เรียงด้วยกฎเดียวกัน
+       (interactionScore ก่อน แล้วค่อย rating)
     """
     data = fetch_data()
     book_tags = build_book_tags(data)
     interacted = get_interacted_books(user_id, data)
+    stats = build_interaction_scores(data)
 
-    scores = defaultdict(float)
-    for row in data["interaction"]:
-        book_id = get_book_id(row)
-        rating = row.get("rating")
-        weight = action_weight(row.get("actionType"), rating)
-        if book_id and weight > 0:
-            scores[str(book_id)] += weight
+    def sort_key(book_id):
+        s = stats.get(book_id, {"score": 0.0, "rating": 0.0})
+        return (-s["score"], -s["rating"])
 
-    ranked = [
-        book_id
-        for book_id, _ in sorted(scores.items(), key=lambda x: -x[1])
-        if book_id not in interacted
-    ]
+    ranked = sorted(
+        (book_id for book_id in stats.keys() if book_id not in interacted),
+        key=sort_key,
+    )
     ranked_filtered = filter_by_genres(ranked, genres, book_tags)
 
-    # ถ้าได้ไม่ครบ n เล่ม → เติมจากหนังสือที่มี rating และ review สูงสุด (ที่ยังไม่เคยดู และตรง genre)
     if len(ranked_filtered) < n:
-        all_books_sorted = sorted(
-            data["books"],
-            key=lambda x: (-(x.get("rating") or 0.0), -(x.get("review_count") or 0))
-        )
-        for b in all_books_sorted:
-            bid = str(b.get("bookID") or "")
-            if bid and bid not in interacted and bid not in ranked_filtered:
-                if book_match_genres(bid, genres, book_tags):
-                    ranked_filtered.append(bid)
-                    if len(ranked_filtered) >= n:
-                        break
+        remaining_book_ids = [
+            str(b.get("bookID"))
+            for b in data["books"]
+            if b.get("bookID")
+            and str(b.get("bookID")) not in interacted
+            and str(b.get("bookID")) not in ranked_filtered
+        ]
+        remaining_sorted = sorted(remaining_book_ids, key=sort_key)
+        for bid in remaining_sorted:
+            if book_match_genres(bid, genres, book_tags):
+                ranked_filtered.append(bid)
+                if len(ranked_filtered) >= n:
+                    break
 
     return ranked_filtered[:n]
 
@@ -363,6 +412,7 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
     data = fetch_data()
     book_tags = build_book_tags(data)
     interacted = get_interacted_books(user_id, data)
+    stats = build_interaction_scores(data)
 
     # ถ้าไม่มี genre ที่ระบุมาเลย → ใช้ genre ที่ผู้ใช้ชอบจาก profile แทน
     effective_genres = genres
@@ -430,8 +480,12 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
 
     reverse_item_map = {v: k for k, v in item_map.items()}
 
-    result = []
-    for item_index in np.argsort(-scores):
+    # ✅ จัดอันดับ (item_index, lightfm_score) แล้วเรียงด้วย:
+    #    1) lightfm_score มากไปน้อย (เกณฑ์หลักจาก personalization model)
+    #    2) ถ้า lightfm_score เท่ากันเป๊ะ → interactionScore มากไปน้อย
+    #    3) ถ้ายังเท่ากันอีก → rating มากไปน้อย (tie-breaker สุดท้าย)
+    candidates = []
+    for item_index, lightfm_score in enumerate(scores):
         book_id = reverse_item_map.get(int(item_index))
         if not book_id:
             continue
@@ -440,11 +494,13 @@ def get_recommendations(user_id: str, n: int = 12, genres: list[str] | None = No
             continue
         if effective_genres and not book_match_genres(book_id, effective_genres, book_tags):
             continue
-        # ถ้าผู้ใช้กด genre filter → แนะนำเฉพาะหนังสือที่มีคนเคย interact แล้ว
         if genres and (book_id not in interacted_book_ids):
             continue
-        result.append(book_id)
-        if len(result) >= n:
-            break
+        s = stats.get(book_id, {"score": 0.0, "rating": 0.0})
+        candidates.append((book_id, float(lightfm_score), s["score"], s["rating"]))
+
+    candidates.sort(key=lambda c: (-c[1], -c[2], -c[3]))
+
+    result = [book_id for book_id, *_ in candidates[:n]]
 
     return result if result else fallback_from_interaction(user_id, n, effective_genres)

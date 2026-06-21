@@ -29,14 +29,10 @@ export default function RecommendationSection() {
   const getTags = (book: any): string[] =>
     ((book.tags ?? book.genres ?? []) as string[]).map((t) => t.toLowerCase());
 
-  // ✅ ใหม่ — key ผูกกับ "วันที่" (YYYY-MM-DD) แทน hasInteraction
-  const getTodayKey = () => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  };
+  const RECS_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 วัน
 
   const getCacheKey = useCallback(
-    (userId?: string) => `recs:${userId ?? "guest"}:${getTodayKey()}`,
+    (userId?: string) => `recs:${userId ?? "guest"}`,
     []
   );
 
@@ -79,8 +75,11 @@ export default function RecommendationSection() {
       try {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
-          const { ids } = JSON.parse(cached);
-          if (ids?.length > 0) {
+          const { ids, ts } = JSON.parse(cached);
+          const isExpired = typeof ts === "number" && Date.now() - ts > RECS_CACHE_MAX_AGE_MS;
+          if (isExpired) {
+            localStorage.removeItem(cacheKey);
+          } else if (ids?.length > 0) {
             const cachedBooks = ids
               .map((id: string) => bookMap.get(id))
               .filter(Boolean) as Book[];

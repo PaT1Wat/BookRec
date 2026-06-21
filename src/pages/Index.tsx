@@ -19,12 +19,10 @@ const GENRE_MAP: Record<string, string> = {
 const GENRE_LABELS = Object.keys(GENRE_MAP);
 
 // ─── cache helpers ─────────────────────────────────────────────────────────────
-// ✅ key ผูกกับ "วันที่ปัจจุบัน" (YYYY-MM-DD) แทน TTL 1 ชั่วโมง
-// ลำดับหนังสือจะคงที่ตลอดวัน แล้วคำนวณใหม่อัตโนมัติตอนข้ามวัน
-function getTodayKey() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
+// ✅ cache key ไม่ผูกกับวันที่ — อยู่ได้ตลอด session จนกว่าจะถูก invalidate
+// (ผ่าน event "recs:invalidate" เมื่อ favorite/review/genre เปลี่ยน)
+// หรือหมดอายุอัตโนมัติหลัง 30 วัน (กันท้ายกรณี event พลาดไป)
+const RECS_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 วัน
 
 function getCacheKey(
   userId: string | undefined,
@@ -32,14 +30,18 @@ function getCacheKey(
   prefGenres: string[]
 ) {
   const sortedPref = [...prefGenres].sort().join(",");
-  return `recs:${userId ?? "guest"}:${genres.join(",")}:${sortedPref}:${getTodayKey()}`;
+  return `recs:${userId ?? "guest"}:${genres.join(",")}:${sortedPref}`;
 }
 
 function loadCachedIds(key: string): string[] | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const { ids } = JSON.parse(raw);
+    const { ids, ts } = JSON.parse(raw);
+    if (typeof ts === "number" && Date.now() - ts > RECS_CACHE_MAX_AGE_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
     return (ids as string[]) ?? null;
   } catch { return null; }
 }
@@ -99,14 +101,14 @@ const computedRating = (b: any): number => {
 // (fav*5 + reviewActionCount*4.5 + view*0.1) ตรงกับสูตรฝั่ง backend/recommend.py
 const interactionScoreOf = (b: any): number => Number(b.interactionScore ?? 0);
 
-// ✅ comparator สำหรับ "ผู้ใช้ใหม่ (มี/ไม่มี genre ที่ชอบ แต่ยังไม่มี interaction)"
-// และ "ผู้ใช้ที่ไม่มี preferredGenres เลย":
-// เรียงตาม rating (เฉลี่ยดาว) ก่อน → ถ้า rating เท่ากัน ค่อยดู interactionScore มากไปน้อย
-const sortByRatingThenInteraction = (a: any, b: any) => {
-  const ratingA = computedRating(a);
-  const ratingB = computedRating(b);
-  if (Math.abs(ratingB - ratingA) > 0.001) return ratingB - ratingA;
-  return interactionScoreOf(b) - interactionScoreOf(a);
+// ✅ comparator หลักของทั้งระบบ — ใช้ภายในทุกกลุ่ม (preferred / interacted / อื่นๆ)
+// เรียงตาม interactionScore (จำนวนคนสนใจ/มีปฏิสัมพันธ์) มากไปน้อยก่อนเสมอ
+// ถ้า interactionScore เท่ากันเป๊ะ ถึงจะใช้ rating (เฉลี่ยดาว) เป็น tie-breaker
+const sortByInteractionThenRating = (a: any, b: any) => {
+  const scoreA = interactionScoreOf(a);
+  const scoreB = interactionScoreOf(b);
+  if (Math.abs(scoreB - scoreA) > 0.001) return scoreB - scoreA;
+  return computedRating(b) - computedRating(a);
 };
 
 // ─── Index ─────────────────────────────────────────────────────────────────────
@@ -125,6 +127,11 @@ const Index = () => {
 
   const [interactedIds, setInteractedIds] = useState<Set<string>>(new Set());
   const [interactionsReady, setInteractionsReady] = useState(false);
+
+  // ✅ แท็กจากหนังสือที่เคย favorite หรือ review ≥ 3 ดาว — ใช้จัดกลุ่ม "สนใจรอง"
+  // (review < 3 ดาว = ไม่ชอบ ไม่เอาแท็กมาแนะนำซ้ำ)
+  const [interactedGenres, setInteractedGenres] = useState<Set<string>>(new Set());
+  const [interactedGenresReady, setInteractedGenresReady] = useState(false);
 
   const [genreWeights, setGenreWeights] = useState<Record<string, number>>({});
 
@@ -147,7 +154,7 @@ const Index = () => {
     return totalInteractions(b) - totalInteractions(a);
   }, [genreWeights]);
 
-  // ─── fetch interactions ────────────────────────────────────────────────────
+  // ─── fetch interactions (ใช้กัน "หนังสือที่เคย interact" ไม่ให้แนะนำซ้ำ) ──────
   const fetchInteractions = useCallback(async () => {
     if (!user) {
       setInteractedIds(new Set());
@@ -167,6 +174,50 @@ const Index = () => {
   }, [user?.id]);
 
   useEffect(() => { fetchInteractions(); }, [fetchInteractions]);
+
+  // ✅ ดึง "แท็กที่สนใจจากพฤติกรรม" — favorite ทั้งหมด + review ที่ให้ ≥ 3 ดาว
+  // ใช้แยกต่างหากจาก interactedIds (ซึ่งมีไว้กันหนังสือซ้ำ ไม่ใช่ดึง signal แท็ก)
+  const fetchInteractedGenres = useCallback(async (booksRef: typeof books) => {
+    if (!user || booksRef.length === 0) {
+      setInteractedGenres(new Set());
+      setInteractedGenresReady(true);
+      return;
+    }
+    setInteractedGenresReady(false);
+    const [{ data: favData }, { data: revData }] = await Promise.all([
+      (supabase as any).from("favorite").select("bookID").eq("user_id", user.id),
+      (supabase as any).from("review").select("bookID, rating").eq("user_id", user.id),
+    ]);
+
+    const likedBookIds = new Set<string>([
+      ...(favData ?? []).map((f: any) => String(f.bookID)),
+      ...(revData ?? [])
+        .filter((r: any) => Number(r.rating ?? 0) >= 3)
+        .map((r: any) => String(r.bookID)),
+    ]);
+
+    const bookMap = new Map<string, any>();
+    booksRef.forEach((b: any) => {
+      bookMap.set(String(b.bookID ?? b.id), b);
+    });
+
+    const genres = new Set<string>();
+    likedBookIds.forEach((id) => {
+      const book = bookMap.get(id);
+      (book?.tags ?? book?.genres ?? []).forEach((tag: string) => {
+        genres.add(tag.toLowerCase());
+      });
+    });
+
+    setInteractedGenres(genres);
+    setInteractedGenresReady(true);
+  }, [user?.id]);
+
+  // ─── fetch interacted genres เมื่อ books โหลดเสร็จ ──────────────────────────
+  useEffect(() => {
+    if (books.length === 0) return;
+    fetchInteractedGenres(books);
+  }, [books.length, fetchInteractedGenres]);
 
   // ─── fetch genre weights จาก rec_impression ───────────────────────────────
   useEffect(() => {
@@ -214,6 +265,7 @@ const Index = () => {
       if (user?.id && detail?.userId !== user.id) return;
       fetchedKeyRef.current = null;
       fetchInteractions();
+      if (books.length > 0) fetchInteractedGenres(books);
       setPrefGenresReady(false);
       if (user?.id) {
         supabase
@@ -233,7 +285,7 @@ const Index = () => {
     };
     window.addEventListener("recs:invalidate", handler);
     return () => window.removeEventListener("recs:invalidate", handler);
-  }, [user?.id, fetchInteractions]);
+  }, [user?.id, fetchInteractions, fetchInteractedGenres, books]);
 
   // ─── helpers ──────────────────────────────────────────────────────────────
   const visibleBooks = books.filter((b) => !(b as any).isHidden);
@@ -247,81 +299,67 @@ const Index = () => {
       : list;
 
   // ─── buildLocalIds ─────────────────────────────────────────────────────────
-  // กฎการเรียง (ยืนยันกับผู้ใช้แล้ว):
-  // 1) ถ้ามีการเลือก genre filter บนหน้าเว็บ (targetGenres) → กรองเฉพาะแนวนั้น
-  //    เรียง rating ก่อน แล้วค่อย interactionScore (ไม่สนใจ interaction ส่วนตัว)
-  // 2) ถ้าผู้ใช้มี preferredGenres (เลือกไว้ตอน onboarding/profile):
-  //    หนังสือที่มีแท็กตรงกับ preferredGenres ขึ้นก่อนเสมอ — ไม่ว่าจะมี
-  //    interaction หรือไม่ และไม่ว่า interacted tags จะตรงกับ preferredGenres
-  //    หรือไม่ก็ตาม (สิ่งที่ผู้ใช้ "เลือกไว้" สำคัญกว่าพฤติกรรมที่ทำจริง)
-  //    ภายในกลุ่มนี้เรียง rating ก่อน แล้วค่อย interactionScore
-  //    ถ้าได้ไม่ครบ RECOMMEND_LIMIT เติมด้วยหนังสือทั่วไป (เรียงแบบเดียวกัน)
-  // 3) ถ้าไม่มี preferredGenres เลย → เรียง rating ก่อน แล้วค่อย
-  //    interactionScore จากทุกเล่ม ไม่กรอง genre
+  // กฎการเรียง (ยืนยันกับผู้ใช้แล้ว — ใช้ logic เดียวกันทุกเคส รวม genre filter
+  // ที่ผู้ใช้เลือกเองบนหน้าเว็บด้วย ไม่มีเคสพิเศษแยกแล้ว):
+  // 1. กรองด้วย targetGenres ก่อน (ถ้าผู้ใช้กด filter อยู่บนหน้าเว็บ) — ถ้าไม่กด
+  //    filter ก็ใช้หนังสือทั้งหมดเป็นฐาน
+  // 2. จากหนังสือที่ผ่านการกรอง (หรือทั้งหมดถ้าไม่กรอง) แบ่งเป็น 3 กลุ่ม:
+  //    - กลุ่ม 1: มีแท็กตรง preferredGenres (ตั้งไว้ตอน onboarding/profile)
+  //      ไม่ว่าจะตรง interactedGenres ด้วยหรือไม่ก็ตาม (ใช้ OR ไม่ใช่ exclusive —
+  //      ถ้าเล่มมีทั้งแท็ก preferred และ interacted ผสมกัน ให้อยู่กลุ่ม 1)
+  //    - กลุ่ม 2: ไม่ตรงกลุ่ม 1 แต่มีแท็กตรง interactedGenres (แท็กจากหนังสือ
+  //      ที่เคย favorite หรือ review ≥ 3 ดาว)
+  //    - กลุ่ม 3: ที่เหลือทั้งหมด (ไม่ตรงทั้งกลุ่ม 1 และ 2)
+  // 3. แต่ละกลุ่มเรียงด้วย interactionScore มากไปน้อยก่อน แล้วค่อย rating
+  //    เป็น tie-breaker (sortByInteractionThenRating)
+  // 4. ต่อกลุ่ม 1 → 2 → 3 แล้วตัดที่ RECOMMEND_LIMIT
   const buildLocalIds = useCallback((
     booksRef: typeof books,
     favSet: Set<string>,
     prefGenres: string[],
     targetGenres: string[],
-    interacted: Set<string>
+    interacted: Set<string>,
+    interactedTags: Set<string>
   ): string[] => {
     const getId = (b: any) => String((b as any).bookID ?? b.id);
     const isExcluded = (id: string) => favSet.has(id) || interacted.has(id);
+    const tagsOf = (b: any) => ((b.genres ?? b.tags ?? []) as string[]).map((t) => t.toLowerCase());
 
-    // ── เคส: เลือก genre filter บนหน้าเว็บอยู่ ──────────────────────────────
-    if (targetGenres.length > 0) {
-      const targetLower = targetGenres.map(t => t.toLowerCase());
-      return [...booksRef]
-        .filter(b => {
-          const id = getId(b);
-          if (isExcluded(id)) return false;
-          const bg = (b.genres ?? b.tags ?? []).map((t: string) => t.toLowerCase());
-          return targetLower.every(dg => bg.includes(dg));
-        })
-        .sort(sortByRatingThenInteraction)
-        .slice(0, RECOMMEND_LIMIT)
-        .map(getId);
-    }
+    // ── กรองฐานหนังสือด้วย genre filter ที่เลือกเอง (ถ้ามี) ──────────────────
+    const targetLower = targetGenres.map((t) => t.toLowerCase());
+    const base = targetLower.length > 0
+      ? booksRef.filter((b) => targetLower.every((dg) => tagsOf(b).includes(dg)))
+      : booksRef;
 
-    // ── เคส C: ไม่มี preferredGenres เลย ────────────────────────────────────
-    if (prefGenres.length === 0) {
-      return [...booksRef]
-        .filter(b => !isExcluded(getId(b)))
-        .sort(sortByRatingThenInteraction)
-        .slice(0, RECOMMEND_LIMIT)
-        .map(getId);
-    }
+    const available = base.filter((b) => !isExcluded(getId(b)));
 
-    // ── เคส A / B / D: มี preferredGenres → หนังสือที่ตรงแท็กขึ้นก่อนเสมอ ──
-    const prefLower = prefGenres.map(g => g.toLowerCase());
+    const prefLower = prefGenres.map((g) => g.toLowerCase());
 
-    const matchingPref = [...booksRef]
-      .filter(b => {
+    // กลุ่ม 1: ตรง preferredGenres
+    const group1 = available
+      .filter((b) => prefLower.length > 0 && tagsOf(b).some((t) => prefLower.includes(t)))
+      .sort(sortByInteractionThenRating);
+    const usedIds = new Set(group1.map(getId));
+
+    // กลุ่ม 2: ไม่ตรงกลุ่ม 1 แต่ตรง interactedGenres
+    const group2 = available
+      .filter((b) => {
         const id = getId(b);
-        if (isExcluded(id)) return false;
-        const bg = (b.genres ?? b.tags ?? []).map((t: string) => t.toLowerCase());
-        return bg.some(t => prefLower.includes(t));
+        if (usedIds.has(id)) return false;
+        return interactedTags.size > 0 && tagsOf(b).some((t) => interactedTags.has(t));
       })
-      .sort(sortByRatingThenInteraction)
+      .sort(sortByInteractionThenRating);
+    group2.forEach((b) => usedIds.add(getId(b)));
+
+    // กลุ่ม 3: ที่เหลือ
+    const group3 = available
+      .filter((b) => !usedIds.has(getId(b)))
+      .sort(sortByInteractionThenRating);
+
+    return [...group1, ...group2, ...group3]
+      .slice(0, RECOMMEND_LIMIT)
       .map(getId);
-
-    if (matchingPref.length >= RECOMMEND_LIMIT) {
-      return matchingPref.slice(0, RECOMMEND_LIMIT);
-    }
-
-    // เติมที่เหลือด้วยหนังสือทั่วไป (ที่ไม่ตรง preferredGenres) เรียงแบบเดียวกัน
-    const used = new Set(matchingPref);
-    const fillRest = [...booksRef]
-      .filter(b => {
-        const id = getId(b);
-        return !isExcluded(id) && !used.has(id);
-      })
-      .sort(sortByRatingThenInteraction)
-      .slice(0, RECOMMEND_LIMIT - matchingPref.length)
-      .map(getId);
-
-    return [...matchingPref, ...fillRest];
-  }, [sortByRatingThenInteraction]);
+  }, []);
 
   // ─── doFetch / applyIds ────────────────────────────────────────────────────
   const doFetch = async (
@@ -329,9 +367,10 @@ const Index = () => {
     favSet: Set<string>,
     prefGenres: string[],
     genresForFetch: string[],
-    interacted: Set<string>
+    interacted: Set<string>,
+    interactedTags: Set<string>
   ): Promise<string[]> => {
-    return buildLocalIds(booksRef, favSet, prefGenres, genresForFetch, interacted);
+    return buildLocalIds(booksRef, favSet, prefGenres, genresForFetch, interacted, interactedTags);
   };
 
   const applyIds = async (
@@ -340,7 +379,8 @@ const Index = () => {
     booksRef: typeof books,
     favSet: Set<string>,
     prefGenres: string[],
-    interacted: Set<string>
+    interacted: Set<string>,
+    interactedTags: Set<string>
   ) => {
     const cached = loadCachedIds(cacheKey);
     if (cached && cached.length > 0) {
@@ -351,7 +391,7 @@ const Index = () => {
     const seq = ++fetchSeqRef.current;
     setRecsReady(false);
     try {
-      const ids = await doFetch(booksRef, favSet, prefGenres, targetDbGenres, interacted);
+      const ids = await doFetch(booksRef, favSet, prefGenres, targetDbGenres, interacted, interactedTags);
       if (seq !== fetchSeqRef.current) return;
       saveCachedIds(cacheKey, ids);
       setRecommendedIds(ids);
@@ -369,17 +409,17 @@ const Index = () => {
   // ─── main effect ──────────────────────────────────────────────────────────
   // ✅ ตัด hasInteractions / interactedIds.size ออกจาก cache key และ deps
   // เพื่อไม่ให้การคลิกดูหนังสือ (เกิด view interaction ใหม่) ไปกระตุ้นให้คำนวณลำดับใหม่
-  // cache key อิงวันที่อย่างเดียว → ลำดับจะคงที่ตลอดวัน เปลี่ยนเฉพาะตอนข้ามวันใหม่
+  // cache key ไม่ผูกกับวันที่แล้ว — รอ invalidate event หรือหมดอายุ 30 วันแทน
   useEffect(() => {
-    if (authLoading || !prefGenresReady || !interactionsReady) return;
+    if (authLoading || !prefGenresReady || !interactionsReady || !interactedGenresReady) return;
     if (books.length === 0) return;
     const cacheKey = getCacheKey(user?.id, dbGenres, preferredGenres);
     if (fetchedKeyRef.current === cacheKey) return;
     fetchedKeyRef.current = cacheKey;
-    applyIds(cacheKey, dbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds);
+    applyIds(cacheKey, dbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds, interactedGenres);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    authLoading, prefGenresReady, interactionsReady,
+    authLoading, prefGenresReady, interactionsReady, interactedGenresReady,
     user?.id, books.length,
     dbGenres.join(","), preferredGenres.join(","),
   ]);
@@ -396,7 +436,7 @@ const Index = () => {
     const cacheKey = getCacheKey(user?.id, nextDbGenres, preferredGenres);
     fetchedKeyRef.current = cacheKey;
     setSelectedGenres(nextGenres);
-    applyIds(cacheKey, nextDbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds);
+    applyIds(cacheKey, nextDbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds, interactedGenres);
   };
 
   // ─── derived lists ─────────────────────────────────────────────────────────
@@ -405,8 +445,9 @@ const Index = () => {
       .map((id) => books.find((b) => String((b as any).bookID ?? b.id) === id))
       .filter(Boolean);
     if (byBackend.length > 0) {
-      // ✅ ไม่ sort ซ้ำ — buildLocalIds จัดลำดับตามกฎ rating→interactionScore /
-      // preferredGenres ไว้แล้ว แค่กรองหนังสือที่กด favorite ไปแล้วออก
+      // ✅ ไม่ sort ซ้ำ — buildLocalIds จัดลำดับตามกฎ 3 กลุ่ม (preferred → interacted
+      // → อื่นๆ) แล้ว interactionScore→rating ภายในแต่ละกลุ่มไว้แล้ว
+      // แค่กรองหนังสือที่กด favorite ไปแล้วออก
       return (byBackend as any[])
         .filter((book) => !favoriteSet.has(String(book.bookID ?? book.id)))
         .slice(0, RECOMMEND_LIMIT);
@@ -419,7 +460,7 @@ const Index = () => {
           ? dbGenres.every((g) => ((b.genres ?? b.tags ?? []) as string[]).includes(g))
           : true
       )
-      .sort(sortByRatingThenInteraction)
+      .sort(sortByInteractionThenRating)
       .slice(0, RECOMMEND_LIMIT);
   }, [recommendedIds, books, dbGenres, favoriteSet]);
 
@@ -486,7 +527,7 @@ const Index = () => {
         </div>
 
         {/* Recommended section */}
-        {authLoading || !prefGenresReady || !interactionsReady || !recsReady ? (
+        {authLoading || !prefGenresReady || !interactionsReady || !interactedGenresReady || !recsReady ? (
           <RecommendSkeleton />
         ) : (
           <>
