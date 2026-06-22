@@ -27,10 +27,12 @@ const RECS_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 วัน
 function getCacheKey(
   userId: string | undefined,
   genres: string[],
-  prefGenres: string[]
+  prefGenres: string[],
+  interactedTags: Set<string>
 ) {
   const sortedPref = [...prefGenres].sort().join(",");
-  return `recs:${userId ?? "guest"}:${genres.join(",")}:${sortedPref}`;
+  const sortedInteracted = [...interactedTags].sort().join(",");
+  return `recs:${userId ?? "guest"}:${genres.join(",")}:${sortedPref}:${sortedInteracted}`; // ✅
 }
 
 function loadCachedIds(key: string): string[] | null {
@@ -423,7 +425,8 @@ const Index = () => {
   useEffect(() => {
     if (authLoading || !prefGenresReady || !interactionsReady || !interactedGenresReady) return;
     if (books.length === 0) return;
-    const cacheKey = getCacheKey(user?.id, dbGenres, preferredGenres);
+    const cacheKey = getCacheKey(user?.id, dbGenres, preferredGenres, interactedGenres); // ✅
+
     if (fetchedKeyRef.current === cacheKey) return;
     fetchedKeyRef.current = cacheKey;
     applyIds(cacheKey, dbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds, interactedGenres);
@@ -443,7 +446,7 @@ const Index = () => {
       : selectedGenres.length >= 3 ? selectedGenres
       : [...selectedGenres, genre];
     const nextDbGenres = nextGenres.map((g) => GENRE_MAP[g]).filter(Boolean);
-    const cacheKey = getCacheKey(user?.id, nextDbGenres, preferredGenres);
+    const cacheKey = getCacheKey(user?.id, nextDbGenres, preferredGenres, interactedGenres); // ✅
     fetchedKeyRef.current = cacheKey;
     setSelectedGenres(nextGenres);
     applyIds(cacheKey, nextDbGenres, books, favoriteSet as Set<string>, preferredGenres, interactedIds, interactedGenres);
