@@ -415,21 +415,52 @@ const Index = () => {
         });
     });
 
-    // Step 2: เติมด้วย interacted tags (ที่ไม่ใช่ pref) เรียงตาม weight ให้ครบ 12
-    const interactedOnly = rankedTags.filter((t) => !prefLower.includes(t));
-    interactedOnly.forEach((tag) => {
-      if (guaranteed.length >= RECOMMEND_LIMIT) return;
+    // Step 1.5: ถ้า preferred tags มีหนังสือน้อยกว่า quota → เติมหนังสือในแท็กเดิม
+    // ให้หมดก่อน (ไม่ข้ามไปแท็กอื่น) เช่น GL มีแค่ 6 เรื่อง → เอาทั้ง 6 มาก่อน
+    if (prefLower.length > 0) {
+      prefLower.forEach((tag) => {
+        available
+          .filter((b) => !guaranteedIds.has(getId(b)) && tagsOf(b).includes(tag))
+          .sort(sortByInteractionThenRating)
+          .forEach((b) => {
+            guaranteedIds.add(getId(b));
+            guaranteed.push(b);
+          });
+      });
+    }
+
+    // Step 2: เติมด้วย interacted tags — เฉพาะ user ที่มี interaction จริงเท่านั้น
+    // user ใหม่ (interactedTags.size === 0) ข้ามขั้นนี้ไปเลย
+    if (interactedTags.size > 0) {
+      const interactedOnly = rankedTags.filter((t) => !prefLower.includes(t));
+      interactedOnly.forEach((tag) => {
+        if (guaranteed.length >= RECOMMEND_LIMIT) return;
+        available
+          .filter((b) => !guaranteedIds.has(getId(b)) && tagsOf(b).includes(tag))
+          .sort(sortByInteractionThenRating)
+          .slice(0, 2)
+          .forEach((b) => {
+            if (guaranteed.length < RECOMMEND_LIMIT) {
+              guaranteedIds.add(getId(b));
+              guaranteed.push(b);
+            }
+          });
+      });
+    }
+
+    // Step 3: ถ้ายังไม่ครบ 12 (user ใหม่ หรือ interacted น้อย)
+    // → เติมหนังสือยอดนิยมที่เหลือ เรียงตาม interactionScore → rating
+    if (guaranteed.length < RECOMMEND_LIMIT) {
       available
-        .filter((b) => !guaranteedIds.has(getId(b)) && tagsOf(b).includes(tag))
+        .filter((b) => !guaranteedIds.has(getId(b)))
         .sort(sortByInteractionThenRating)
-        .slice(0, 2)
         .forEach((b) => {
           if (guaranteed.length < RECOMMEND_LIMIT) {
             guaranteedIds.add(getId(b));
             guaranteed.push(b);
           }
         });
-    });
+    }
 
 
     // ✅ เรียง guaranteed ใหม่ตาม weight ของแท็กที่ดีที่สุดของแต่ละเล่ม
