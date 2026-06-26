@@ -147,6 +147,7 @@ const BookDetailPage = () => {
 
       toast({ title: "ส่งความคิดเห็นสำเร็จ ✅" });
       clearUserRecsCache(user.id);
+      window.dispatchEvent(new CustomEvent("recs:invalidate", { detail: { userId: user.id } }));
     } catch (err: any) {
       toast({
         title: "เกิดข้อผิดพลาด",
@@ -169,6 +170,9 @@ const BookDetailPage = () => {
         await logInteraction(wasFav ? "unfavorite" : "favorite", Number(id));
       }
       await refetchBooks();
+      // ✅ เพิ่ม 2 บรรทัดนี้
+      if (user) clearUserRecsCache(user.id);
+      if (user) window.dispatchEvent(new CustomEvent("recs:invalidate", { detail: { userId: user.id } }));
     } catch {
       toast({
         title: "เกิดข้อผิดพลาด",

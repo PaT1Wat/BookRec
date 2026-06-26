@@ -275,6 +275,14 @@ const Index = () => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (user?.id && detail?.userId !== user.id) return;
+
+      // ✅ เพิ่มตรงนี้ — ล้าง cache ก่อนเสมอ
+      try {
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith(`recs:${user?.id ?? "guest"}`))
+          .forEach((k) => localStorage.removeItem(k));
+      } catch {}
+
       fetchedKeyRef.current = null;
       fetchInteractions();
       if (books.length > 0) fetchInteractedGenres(books);
@@ -368,10 +376,31 @@ const Index = () => {
       .filter((b) => !usedIds.has(getId(b)))
       .sort(sortByInteractionThenRating);
 
-    return [...group1, ...group2, ...group3]
+    // ✅ การันตี quota ต่อแท็ก — แต่ละ prefGenre ได้อย่างน้อย 2 เล่มก่อนเสมอ
+    const QUOTA_PER_TAG = 2;
+    const guaranteed: any[] = [];
+    const guaranteedIds = new Set<string>();
+
+    prefLower.forEach((tag) => {
+      available
+        .filter((b) => !guaranteedIds.has(getId(b)) && tagsOf(b).includes(tag))
+        .sort(sortByInteractionThenRating)
+        .slice(0, QUOTA_PER_TAG)
+        .forEach((b) => {
+          guaranteedIds.add(getId(b));
+          guaranteed.push(b);
+        });
+    });
+
+    // เอา guaranteed มาก่อน แล้วเติมด้วย group1/2/3 ที่ยังไม่มีใน guaranteed
+    const rest = [...group1, ...group2, ...group3]
+      .filter((b) => !guaranteedIds.has(getId(b)));
+
+    return [...guaranteed, ...rest]
       .slice(0, RECOMMEND_LIMIT)
       .map(getId);
-  }, []);
+  }, [sortByInteractionThenRating]);
+
 
   // ─── doFetch / applyIds ────────────────────────────────────────────────────
   const doFetch = async (
