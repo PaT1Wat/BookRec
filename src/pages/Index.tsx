@@ -376,6 +376,23 @@ const Index = () => {
       .filter((b) => !usedIds.has(getId(b)))
       .sort(sortByInteractionThenRating);
 
+    // ✅ คำนวณ effective weight ของแต่ละแท็ก
+    // — prefGenres มีน้ำหนักเริ่มต้น 1.0
+    // — interactedTags เพิ่ม 0.5 ต่อแท็ก (ถ้า interact เยอะจะแซง pref ได้)
+    const tagWeights = new Map<string, number>();
+    prefLower.forEach((tag) => {
+      tagWeights.set(tag, 1.0);
+    });
+    interactedTags.forEach((tag) => {
+      tagWeights.set(tag, (tagWeights.get(tag) ?? 0) + 0.5);
+    });
+
+    // เรียงแท็กตาม weight มากไปน้อย
+    const rankedTags = [...tagWeights.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag]) => tag);
+    
+
     // ✅ การันตี quota ต่อแท็ก — แต่ละ prefGenre ได้อย่างน้อย 2 เล่มก่อนเสมอ
     const QUOTA_PER_TAG = 2;
     const guaranteed: any[] = [];
