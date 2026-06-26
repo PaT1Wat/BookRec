@@ -388,7 +388,7 @@ const Index = () => {
       tagWeights.set(tag, 1.0);
     });
     interactedTags.forEach((count,tag) => {
-      tagWeights.set(tag, (tagWeights.get(tag) ?? 0) + 0.5);
+      tagWeights.set(tag, (tagWeights.get(tag) ?? 0) +  count * 0.5);
     });
 
     // เรียงแท็กตาม weight มากไปน้อย
@@ -410,6 +410,20 @@ const Index = () => {
           guaranteedIds.add(getId(b));
           guaranteed.push(b);
         });
+    });
+
+    // ✅ เรียง guaranteed ใหม่ตาม weight ของแท็กที่ดีที่สุดของแต่ละเล่ม
+    const tagWeightOf = (b: any): number => {
+      return Math.max(
+        0,
+        ...tagsOf(b).map((t) => tagWeights.get(t) ?? 0)
+      );
+    };
+
+    guaranteed.sort((a, b) => {
+      const wDiff = tagWeightOf(b) - tagWeightOf(a);
+      if (Math.abs(wDiff) > 0.001) return wDiff;
+      return sortByInteractionThenRating(a, b);
     });
 
     // เอา guaranteed มาก่อน แล้วเติมด้วย group1/2/3 ที่ยังไม่มีใน guaranteed
