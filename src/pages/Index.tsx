@@ -412,6 +412,26 @@ const Index = () => {
         });
     });
 
+    // ✅ ชั้นที่ 2 — เติม interactedTags ที่ไม่ใช่ pref เรียงตาม weight
+    // จำนวนที่เหลือ = RECOMMEND_LIMIT - guaranteed.length
+    const remaining = RECOMMEND_LIMIT - guaranteed.length;
+    if (remaining > 0) {
+      const interactedOnly = rankedTags.filter((t) => !prefLower.includes(t));
+      interactedOnly.forEach((tag) => {
+        available
+          .filter((b) => !guaranteedIds.has(getId(b)) && tagsOf(b).includes(tag))
+          .sort(sortByInteractionThenRating)
+          .slice(0, 2)
+          .forEach((b) => {
+            if (guaranteed.length < RECOMMEND_LIMIT) {
+              guaranteedIds.add(getId(b));
+              guaranteed.push(b);
+            }
+          });
+      });
+    }
+
+
     // ✅ เรียง guaranteed ใหม่ตาม weight ของแท็กที่ดีที่สุดของแต่ละเล่ม
     const tagWeightOf = (b: any): number => {
       return Math.max(
