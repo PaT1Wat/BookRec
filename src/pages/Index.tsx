@@ -433,12 +433,8 @@ const Index = () => {
 
 
     // ✅ เรียง guaranteed ใหม่ตาม weight ของแท็กที่ดีที่สุดของแต่ละเล่ม
-    const tagWeightOf = (b: any): number => {
-      return Math.max(
-        0,
-        ...tagsOf(b).map((t) => tagWeights.get(t) ?? 0)
-      );
-    };
+    const tagWeightOf = (b: any): number =>
+      Math.max(0, ...tagsOf(b).map((t) => tagWeights.get(t) ?? 0));
 
     guaranteed.sort((a, b) => {
       const wDiff = tagWeightOf(b) - tagWeightOf(a);
