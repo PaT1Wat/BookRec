@@ -28,10 +28,13 @@ function getCacheKey(
   userId: string | undefined,
   genres: string[],
   prefGenres: string[],
-  interactedTags: Set<string>
+  interactedTags: Map<string, number> // ✅ เปลี่ยน type
 ) {
   const sortedPref = [...prefGenres].sort().join(",");
-  const sortedInteracted = [...interactedTags].sort().join(",");
+  const sortedInteracted = [...interactedTags.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}:${v}`)
+    .join(",");
   return `recs:${userId ?? "guest"}:${genres.join(",")}:${sortedPref}:${sortedInteracted}`; // ✅
 }
 
@@ -132,7 +135,8 @@ const Index = () => {
 
   // ✅ แท็กจากหนังสือที่เคย favorite หรือ review ≥ 3 ดาว — ใช้จัดกลุ่ม "สนใจรอง"
   // (review < 3 ดาว = ไม่ชอบ ไม่เอาแท็กมาแนะนำซ้ำ)
-  const [interactedGenres, setInteractedGenres] = useState<Set<string>>(new Set());
+  const [interactedGenres, setInteractedGenres] = useState<Map<string, number>>(new Map());
+
   const [interactedGenresReady, setInteractedGenresReady] = useState(false);
 
   const [genreWeights, setGenreWeights] = useState<Record<string, number>>({});
@@ -191,7 +195,7 @@ const Index = () => {
   // ใช้แยกต่างหากจาก interactedIds (ซึ่งมีไว้กันหนังสือซ้ำ ไม่ใช่ดึง signal แท็ก)
   const fetchInteractedGenres = useCallback(async (booksRef: typeof books) => {
     if (!user || booksRef.length === 0) {
-      setInteractedGenres(new Set());
+      setInteractedGenres(new Map());
       setInteractedGenresReady(true);
       return;
     }
@@ -213,15 +217,15 @@ const Index = () => {
       bookMap.set(String(b.bookID ?? b.id), b);
     });
 
-    const genres = new Set<string>();
+    const genreCount = new Map<string, number>();
     likedBookIds.forEach((id) => {
       const book = bookMap.get(id);
       (book?.tags ?? book?.genres ?? []).forEach((tag: string) => {
-        genres.add(tag.toLowerCase());
+        const t = tag.toLowerCase();
+        genreCount.set(t, (genreCount.get(t) ?? 0) + 1);
       });
     });
-
-    setInteractedGenres(genres);
+    setInteractedGenres(genreCount);
     setInteractedGenresReady(true);
   }, [user?.id]);
 
@@ -339,7 +343,7 @@ const Index = () => {
     prefGenres: string[],
     targetGenres: string[],
     interacted: Set<string>,
-    interactedTags: Set<string>
+    interactedTags: Map<string, number> // ✅ เปลี่ยน type
   ): string[] => {
     const getId = (b: any) => String((b as any).bookID ?? b.id);
     const isExcluded = (id: string) => favSet.has(id) || interacted.has(id);
@@ -362,7 +366,7 @@ const Index = () => {
     const usedIds = new Set(group1.map(getId));
 
     // กลุ่ม 2: ไม่ตรงกลุ่ม 1 แต่ตรง interactedGenres
-    const group2 = available
+   const group2 = available
       .filter((b) => {
         const id = getId(b);
         if (usedIds.has(id)) return false;
@@ -383,7 +387,7 @@ const Index = () => {
     prefLower.forEach((tag) => {
       tagWeights.set(tag, 1.0);
     });
-    interactedTags.forEach((tag) => {
+    interactedTags.forEach((count,tag) => {
       tagWeights.set(tag, (tagWeights.get(tag) ?? 0) + 0.5);
     });
 
@@ -391,14 +395,13 @@ const Index = () => {
     const rankedTags = [...tagWeights.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([tag]) => tag);
-    
 
     // ✅ การันตี quota ต่อแท็ก — แต่ละ prefGenre ได้อย่างน้อย 2 เล่มก่อนเสมอ
     const QUOTA_PER_TAG = 2;
     const guaranteed: any[] = [];
     const guaranteedIds = new Set<string>();
 
-    prefLower.forEach((tag) => {
+    rankedTags.forEach((tag) => {
       available
         .filter((b) => !guaranteedIds.has(getId(b)) && tagsOf(b).includes(tag))
         .sort(sortByInteractionThenRating)
@@ -426,7 +429,7 @@ const Index = () => {
     prefGenres: string[],
     genresForFetch: string[],
     interacted: Set<string>,
-    interactedTags: Set<string>
+    interactedTags: Map<string, number>
   ): Promise<string[]> => {
     return buildLocalIds(booksRef, favSet, prefGenres, genresForFetch, interacted, interactedTags);
   };
@@ -438,7 +441,7 @@ const Index = () => {
     favSet: Set<string>,
     prefGenres: string[],
     interacted: Set<string>,
-    interactedTags: Set<string>
+    interactedTags: Map<string, number>
   ) => {
     const cached = loadCachedIds(cacheKey);
     if (cached && cached.length > 0) {
