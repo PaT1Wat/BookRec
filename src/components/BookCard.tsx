@@ -24,7 +24,26 @@ const BookCard = ({ book }: BookCardProps) => {
   const reviewCount       = Number(book.reviewCount ?? 0);
 
 
-  const displayRating = book.rating ?? 0;
+  const displayRating = (() => {
+    const rating = Number(book.rating ?? 0);
+    const negativeReviews = Number((book as any).negativeReviewCount ?? 0);
+    const totalReviews = Number(book.reviewCount ?? 0);
+
+    if (rating > 0) {
+      if (totalReviews > 0 && negativeReviews > 0) {
+        const negativePenalty = (negativeReviews * 1.0) / totalReviews;
+        return Number(Math.max(0, rating - negativePenalty).toFixed(1));
+      }
+      return rating;
+    }
+
+    const negRev = Number((book as any).negativeReviewCount ?? 0);
+    const positiveRev = Math.max(0, reviewActionCount - negRev);
+    const denom = favoriteCount + reviewActionCount;
+    if (denom === 0) return 0;
+    return Number(Math.min(5, (favoriteCount * 5.0 + positiveRev * 4.5) / denom).toFixed(1));
+  })();
+    
 
   const interactionScore = Number((book as any).interactionScore ?? 0);
 

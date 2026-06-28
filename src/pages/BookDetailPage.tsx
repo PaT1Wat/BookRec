@@ -229,11 +229,31 @@ const BookDetailPage = () => {
       return weight > 0 ? weight : null; // weight <= 0 → ตัดทิ้ง (return null)
     })
     .filter((v): v is number => v !== null);
-  const avgRating = reviews.length
-    ? (ratedValues.length
+  
+  const avgRating = (() => {
+    if (reviews.length > 0) {
+      return ratedValues.length
         ? Number((ratedValues.reduce((sum, v) => sum + v, 0) / ratedValues.length).toFixed(1))
-        : 0)
-    : Number(book.rating ?? 0);
+        : 0;
+    }
+
+    const rating = Number(book.rating ?? 0);
+    const negativeReviews = Number((book as any).negativeReviewCount ?? 0);
+    const totalReviews = Number((book as any).reviewCount ?? 0);
+
+    if (rating > 0) {
+      if (totalReviews > 0 && negativeReviews > 0) {
+        const negativePenalty = (negativeReviews * 1.0) / totalReviews;
+        return Number(Math.max(0, rating - negativePenalty).toFixed(1));
+      }
+      return rating;
+    }
+
+    const positiveRev = Math.max(0, reviewActionCount - negativeReviews);
+    const denom = favoriteCount + reviewActionCount;
+    if (denom === 0) return 0;
+    return Number(Math.min(5, (favoriteCount * 5.0 + positiveRev * 4.5) / denom).toFixed(1));
+  })();
 
   // ✅ interaction score ตาม recommend.py (action_weight: weight = 1.5*rating - 2.5)
   // แยกตามกฎเดียวกับ avgRating ข้างบน: ให้ดาวอย่างเดียว → นับดาวตรงๆ,
